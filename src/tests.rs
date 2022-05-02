@@ -54,14 +54,14 @@ fn mmap_file() {
     data_options.offset(17); // random header
     let mmap = MmapFile::new(file, &mut len, data_options.clone()).expect("mmap failed");
 
-    let mut vec = unsafe { mmap.try_into_vec::<Record41>() }.unwrap();
+    let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
     memvec_push10(&mut vec);
 
     let mut file = vec.into_mem().into_file();
     file.flush().expect("flush failed");
 
     let mmap = MmapFile::new(file, &mut len, data_options).expect("mmap failed");
-    let mut vec = unsafe { mmap.try_into_vec::<Record41>() }.unwrap();
+    let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
     memvec_check10(&vec);
     memvec_shirink10(&mut vec);
 
@@ -82,15 +82,15 @@ fn memvec_file() {
         .open(&path)
         .expect("file failed");
 
-    let vec_file = VecFile::new(file).expect("mmap failed");
-    let mut vec = unsafe { vec_file.try_into_vec::<Record41>() }.unwrap();
+    let vec_file = VecFile::from_file(file).expect("mmap failed");
+    let mut vec = unsafe { vec_file.try_into_memvec::<Record41>() }.unwrap();
     memvec_push10(&mut vec);
 
     let mut file = vec.into_mem().into_file();
     file.flush().expect("flush failed");
 
-    let vec_file = VecFile::new(file).expect("mmap failed");
-    let mut vec = unsafe { vec_file.try_into_vec::<Record41>() }.unwrap();
+    let vec_file = VecFile::from_file(file).expect("mmap failed");
+    let mut vec = unsafe { vec_file.try_into_memvec::<Record41>() }.unwrap();
     memvec_check10(&vec);
     memvec_shirink10(&mut vec);
 
