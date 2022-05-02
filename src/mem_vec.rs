@@ -17,6 +17,9 @@ where
     fn shrink(&mut self, capacity: usize) -> Result<(), Self::Err>;
 }
 
+/// A memory-backed vector.
+///
+/// See document of std::vec::Vec for each methods.
 pub struct MemVec<'a, T, A: 'a + Memory<T>> {
     mem: A,
     _marker: PhantomData<&'a T>,
@@ -25,13 +28,14 @@ pub struct MemVec<'a, T, A: 'a + Memory<T>> {
 impl<'a, T, A: 'a + Memory<T>> Deref for MemVec<'a, T, A> {
     type Target = [T];
     fn deref(&self) -> &Self::Target {
-        unsafe { self.mem.deref().get_unchecked(..self.len()) }
+        let len = self.mem.len();
+        unsafe { self.mem.deref().get_unchecked(..len) }
     }
 }
 
 impl<'a, T, A: 'a + Memory<T>> DerefMut for MemVec<'a, T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        let len = self.len();
+        let len = self.mem.len();
         unsafe { self.mem.deref_mut().get_unchecked_mut(..len) }
     }
 }
@@ -46,10 +50,19 @@ impl<'a, T, A: 'a + Memory<T>> From<A> for MemVec<'a, T, A> {
 }
 
 impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
-    pub fn into_memory(self) -> A {
+    pub fn into_mem(self) -> A {
         self.mem
     }
+    pub fn as_mem(&self) -> &A {
+        &self.mem
+    }
+    pub fn as_mem_mut(&mut self) -> &mut A {
+        &mut self.mem
+    }
+}
 
+// std::vec::Vec methods
+impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
     #[inline]
     pub fn capacity(&self) -> usize {
         self.mem.len()

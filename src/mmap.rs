@@ -5,31 +5,20 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-pub struct MmapFile<T> {
+pub struct MmapFile<'a, T> {
     options: MmapOptions,
-    #[allow(dead_code)]
-    len_mmap: MmapMut,
-    len: *mut usize,
     mmap: MmapMut,
+    len: &'a mut usize,
     file: File,
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T> MmapFile<T> {
+impl<'a, T> MmapFile<'a, T> {
     pub unsafe fn new(
         file: File,
-        len_options: MmapOptions,
+        len: &'a mut usize,
         data_options: MmapOptions,
     ) -> std::io::Result<Self> {
-        let len_mmap = len_options.map_mut(&file)?;
-        let len = {
-            let (prefix, body, suffix) = len_mmap.deref().align_to::<u64>();
-            assert_eq!(prefix.len(), 0);
-            assert_eq!(suffix.len(), 0);
-            assert_eq!(body.len(), 1);
-            &mut *(body.as_ptr() as *mut usize)
-        };
-        assert_eq!(len_mmap.deref().len(), std::mem::size_of::<u64>());
         let mmap = data_options.map_mut(&file)?;
         let (prefix, _, suffix) = mmap.deref().align_to::<T>();
         assert_eq!(prefix.len(), 0);
@@ -37,9 +26,8 @@ impl<T> MmapFile<T> {
         assert!(mmap.deref().len() >= *len);
         Ok(Self {
             options: data_options,
-            len_mmap,
-            len,
             mmap,
+            len,
             file,
             _marker: std::marker::PhantomData,
         })
@@ -50,7 +38,7 @@ impl<T> MmapFile<T> {
     }
 }
 
-impl<T> std::ops::Deref for MmapFile<T> {
+impl<'a, T> std::ops::Deref for MmapFile<'a, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -63,7 +51,7 @@ impl<T> std::ops::Deref for MmapFile<T> {
     }
 }
 
-impl<T> std::ops::DerefMut for MmapFile<T> {
+impl<'a, T> std::ops::DerefMut for MmapFile<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
             let (prefix, slice, suffix) = self.mmap.deref_mut().align_to_mut::<T>();
@@ -74,18 +62,18 @@ impl<T> std::ops::DerefMut for MmapFile<T> {
     }
 }
 
-impl<T> Memory<T> for MmapFile<T>
+impl<'a, T> Memory<T> for MmapFile<'a, T>
 where
     Self: Deref<Target = [T]> + DerefMut<Target = [T]>,
 {
     type Err = std::io::Error;
 
     fn len(&self) -> usize {
-        unsafe { *self.len }
+        *self.len
     }
 
     fn len_mut(&mut self) -> &mut usize {
-        unsafe { &mut *self.len }
+        self.len
     }
 
     fn reserve(&mut self, capacity: usize) -> std::io::Result<()> {
@@ -113,11 +101,13 @@ where
     }
 }
 
-pub struct MemVecFile<T> {
-    mmap_file: MmapFile<T>,
+pub struct MemVecFile<'a, T> {
+    mmap_file: MmapFile<'a, T>,
+    #[allow(dead_code)]
+    len_mmap: MmapMut,
 }
 
-impl<T> MemVecFile<T> {
+impl<'a, T> MemVecFile<'a, T> {
     pub fn new(file: File) -> std::io::Result<Self> {
         const HEADER_LEN: u64 = std::mem::size_of::<u64>() as u64;
 
@@ -127,14 +117,27 @@ impl<T> MemVecFile<T> {
         };
         let mut len_options = MmapOptions::new();
         len_options.len(HEADER_LEN as usize);
+
+        let len_mmap = unsafe { len_options.map_mut(&file) }?;
+        let len = {
+            let (prefix, body, suffix) = unsafe { len_mmap.deref().align_to::<u64>() };
+            assert_eq!(prefix.len(), 0);
+            assert_eq!(suffix.len(), 0);
+            assert_eq!(body.len(), 1);
+            unsafe { &mut *(body.as_ptr() as *mut usize) }
+        };
+
         let mut data_options = MmapOptions::new();
         data_options.offset(HEADER_LEN);
 
-        let mut mmap_file = unsafe { MmapFile::new(file, len_options, data_options) }?;
+        let mut mmap_file = unsafe { MmapFile::new(file, len, data_options) }?;
         if need_init {
             *mmap_file.len_mut() = 0;
         }
-        Ok(Self { mmap_file })
+        Ok(Self {
+            mmap_file,
+            len_mmap,
+        })
     }
 
     pub fn into_file(self) -> File {
@@ -142,7 +145,7 @@ impl<T> MemVecFile<T> {
     }
 }
 
-impl<T> std::ops::Deref for MemVecFile<T> {
+impl<'a, T> std::ops::Deref for MemVecFile<'a, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -150,13 +153,13 @@ impl<T> std::ops::Deref for MemVecFile<T> {
     }
 }
 
-impl<T> std::ops::DerefMut for MemVecFile<T> {
+impl<'a, T> std::ops::DerefMut for MemVecFile<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.mmap_file.deref_mut()
     }
 }
 
-impl<T> Memory<T> for MemVecFile<T>
+impl<'a, T> Memory<T> for MemVecFile<'a, T>
 where
     Self: Deref<Target = [T]> + DerefMut<Target = [T]>,
 {
