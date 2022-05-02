@@ -114,7 +114,15 @@ impl<'a> core::fmt::Debug for VecFile<'a> {
 }
 
 impl<'a> VecFile<'a> {
-    pub fn new(file: File) -> std::io::Result<Self> {
+    pub fn from_path(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let file = File::options()
+            .read(true)
+            .append(true)
+            .create(true)
+            .open(path.as_ref())?;
+        Self::from_file(file)
+    }
+    pub fn from_file(file: File) -> std::io::Result<Self> {
         const HEADER_LEN: u64 = core::mem::size_of::<u64>() as u64;
 
         let need_init = file.metadata()?.len() == 0;

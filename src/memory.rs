@@ -16,7 +16,7 @@ where
     /// Create a MemVec object with memory.
     /// # Safety
     /// The memory must represent valid len and bytes representations of T.
-    unsafe fn try_into_vec<'a, T: Copy>(
+    unsafe fn try_into_memvec<'a, T: Copy>(
         self,
     ) -> Result<MemVec<'a, T, Self>, (Self, MemoryConversionError)>
     where

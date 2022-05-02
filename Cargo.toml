@@ -1,8 +1,13 @@
 [package]
 name = "memvec"
-version = "0.1.0"
+version = "0.0.2"
 edition = "2021"
-
+license-file = "LICENSE"
+homepage = "https://github.com/youknowone/memvec"
+repository = "https://github.com/youknowone/memvec.git"
+documentation = "https://docs.rs/memvec"
+keywords = ["mmap", "memmap2", "vec", "file", "data-structure"]
+description = "Memory-backed vector, not buffer. Designed for for mmap. Not MemMap, but MemVec!"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

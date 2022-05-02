@@ -1,22 +1,14 @@
-# MemVec
-
-`MemVec` is a Vec-like interface for continuous memory buffer. Mostly intended to be used with `mmap`.
-
-
-## VecFile + MemVec
-
-```rust
-use memvec::{MemVec, VecFile};
-
-#[derive(Copy, Clone)]
-#[repr(C, packed)]
-struct Record {
-    time: std::time::Instant,
-    event_id: u32,
-    _payload: [u8; 50], // we will not use it
-}
-
 fn main() {
+    use memvec::{MemVec, VecFile};
+
+    #[derive(Copy, Clone)]
+    #[repr(C, packed)]
+    struct Record {
+        time: std::time::Instant,
+        event_id: u32,
+        _payload: [u8; 50], // we will not use it
+    }
+
     let mut path = std::env::temp_dir();
     path.push("vecfile.memvec");
 
@@ -47,4 +39,3 @@ fn main() {
         println!("deleted existing file: {path:?}");
     }
 }
-```
