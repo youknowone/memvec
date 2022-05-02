@@ -5,4 +5,4 @@ mod mmap;
 mod tests;
 
 pub use mem_vec::{MemVec, Memory};
-pub use mmap::{MemVecFile, MmapFile};
+pub use mmap::{MmapFile, VecFile};

@@ -101,13 +101,13 @@ where
     }
 }
 
-pub struct MemVecFile<'a, T> {
+pub struct VecFile<'a, T> {
     mmap_file: MmapFile<'a, T>,
     #[allow(dead_code)]
     len_mmap: MmapMut,
 }
 
-impl<'a, T> MemVecFile<'a, T> {
+impl<'a, T> VecFile<'a, T> {
     pub fn new(file: File) -> std::io::Result<Self> {
         const HEADER_LEN: u64 = std::mem::size_of::<u64>() as u64;
 
@@ -145,7 +145,7 @@ impl<'a, T> MemVecFile<'a, T> {
     }
 }
 
-impl<'a, T> std::ops::Deref for MemVecFile<'a, T> {
+impl<'a, T> std::ops::Deref for VecFile<'a, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -153,13 +153,13 @@ impl<'a, T> std::ops::Deref for MemVecFile<'a, T> {
     }
 }
 
-impl<'a, T> std::ops::DerefMut for MemVecFile<'a, T> {
+impl<'a, T> std::ops::DerefMut for VecFile<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.mmap_file.deref_mut()
     }
 }
 
-impl<'a, T> Memory<T> for MemVecFile<'a, T>
+impl<'a, T> Memory<T> for VecFile<'a, T>
 where
     Self: Deref<Target = [T]> + DerefMut<Target = [T]>,
 {

@@ -20,12 +20,12 @@ where
 /// A memory-backed vector.
 ///
 /// See document of std::vec::Vec for each methods.
-pub struct MemVec<'a, T, A: 'a + Memory<T>> {
+pub struct MemVec<'a, T: Copy, A: 'a + Memory<T>> {
     mem: A,
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T, A: 'a + Memory<T>> Deref for MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory<T>> Deref for MemVec<'a, T, A> {
     type Target = [T];
     fn deref(&self) -> &Self::Target {
         let len = self.mem.len();
@@ -33,14 +33,14 @@ impl<'a, T, A: 'a + Memory<T>> Deref for MemVec<'a, T, A> {
     }
 }
 
-impl<'a, T, A: 'a + Memory<T>> DerefMut for MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory<T>> DerefMut for MemVec<'a, T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let len = self.mem.len();
         unsafe { self.mem.deref_mut().get_unchecked_mut(..len) }
     }
 }
 
-impl<'a, T, A: 'a + Memory<T>> From<A> for MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory<T>> From<A> for MemVec<'a, T, A> {
     fn from(mem: A) -> Self {
         Self {
             mem,
@@ -49,7 +49,7 @@ impl<'a, T, A: 'a + Memory<T>> From<A> for MemVec<'a, T, A> {
     }
 }
 
-impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
     pub fn into_mem(self) -> A {
         self.mem
     }
@@ -62,7 +62,7 @@ impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
 }
 
 // std::vec::Vec methods
-impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
     #[inline]
     pub fn capacity(&self) -> usize {
         self.mem.len()
@@ -280,14 +280,14 @@ impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
         // This drop guard will be invoked when predicate or `drop` of element panicked.
         // It shifts unchecked elements to cover holes and `set_len` to the correct length.
         // In cases when predicate and `drop` never panick, it will be optimized out.
-        struct BackshiftOnDrop<'a, 'v, T, A: Memory<T>> {
+        struct BackshiftOnDrop<'a, 'v, T: Copy, A: Memory<T>> {
             v: &'a mut MemVec<'v, T, A>,
             processed_len: usize,
             deleted_cnt: usize,
             original_len: usize,
         }
 
-        impl<T, A: Memory<T>> Drop for BackshiftOnDrop<'_, '_, T, A> {
+        impl<T: Copy, A: Memory<T>> Drop for BackshiftOnDrop<'_, '_, T, A> {
             fn drop(&mut self) {
                 if self.deleted_cnt > 0 {
                     // SAFETY: Trailing unchecked items must be valid since we never touch them.
@@ -315,7 +315,7 @@ impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
             original_len,
         };
 
-        fn process_loop<F, T, A: Memory<T>, const DELETED: bool>(
+        fn process_loop<F, T: Copy, A: Memory<T>, const DELETED: bool>(
             original_len: usize,
             f: &mut F,
             g: &mut BackshiftOnDrop<'_, '_, T, A>,
@@ -379,7 +379,7 @@ impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
         }
 
         /* INVARIANT: vec.len() > read >= write > write-1 >= 0 */
-        struct FillGapOnDrop<'a, 'b, T, A: Memory<T>> {
+        struct FillGapOnDrop<'a, 'b, T: Copy, A: Memory<T>> {
             /* Offset of the element we want to check if it is duplicate */
             read: usize,
 
@@ -391,7 +391,7 @@ impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
             vec: &'a mut MemVec<'b, T, A>,
         }
 
-        impl<'a, 'b, T, A: Memory<T>> Drop for FillGapOnDrop<'a, 'b, T, A> {
+        impl<'a, 'b, T: Copy, A: Memory<T>> Drop for FillGapOnDrop<'a, 'b, T, A> {
             fn drop(&mut self) {
                 /* This code gets executed when `same_bucket` panics */
                 /* SAFETY: invariant guarantees that `read - write`
@@ -490,29 +490,12 @@ impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
         }
     }
 
-    // #[inline]
-    // pub fn append(&mut self, other: &mut Self) {
-    //     unsafe {
-    //         self.append_elements(other.as_slice() as _);
-    //         other.set_len(0);
-    //     }
-    // }
-
-    // #[inline]
-    // unsafe fn append_elements(&mut self, other: *const [T]) {
-    //     let count = unsafe { (*other).len() };
-    //     self.reserve(count);
-    //     let len = self.len();
-    //     unsafe { ptr::copy_nonoverlapping(other as *const T, self.as_mut_ptr().add(len), count) };
-    //     *self.mem.len_mut() += count;
-    // }
-
     // drain
 
-    // #[inline]
-    // pub fn clear(&mut self) {
-    //     self.truncate(0)
-    // }
+    #[inline]
+    pub fn clear(&mut self) {
+        self.truncate(0)
+    }
 
     #[inline]
     pub fn len(&self) -> usize {
@@ -549,6 +532,11 @@ impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
             )
         }
     }
+
+    #[inline]
+    pub fn ptr(&self) -> *mut T {
+        self.mem.deref() as *const _ as *mut T
+    }
 }
 
 trait ExtendWith<T> {
@@ -581,7 +569,7 @@ fn capacity_overflow() -> usize {
     panic!("capacity overflow");
 }
 
-impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
     // pub(crate) const MIN_NON_ZERO_CAP: usize = if std::mem::size_of::<T>() == 1 {
     //     8
     // } else if std::mem::size_of::<T>() <= 1024 {
@@ -589,11 +577,6 @@ impl<'a, T, A: 'a + Memory<T>> MemVec<'a, T, A> {
     // } else {
     //     1
     // };
-
-    #[inline]
-    pub fn ptr(&self) -> *mut T {
-        self.mem.deref() as *const _ as *mut T
-    }
 
     /// Returns if the buffer needs to grow to fulfill the needed extra capacity.
     /// Mainly used to make inlining reserve-calls possible without inlining `grow`.

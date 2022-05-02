@@ -2,12 +2,13 @@ use crate::*;
 use memmap2::MmapOptions;
 use std::{fs::File, io::Write};
 
-trait Record: Sized {
+trait Record: Sized + Copy {
     fn new(id: usize) -> Self;
     fn validate(&self, id: usize) -> bool;
 }
 
 #[repr(C, packed)]
+#[derive(Clone, Copy)]
 struct Record41 {
     id: u8,
     a: u64,
@@ -84,13 +85,13 @@ fn memvec_file() {
         .open(&path)
         .expect("file failed");
 
-    let vec = MemVec::from(MemVecFile::<Record41>::new(file).expect("mmap failed"));
+    let vec = MemVec::from(VecFile::<Record41>::new(file).expect("mmap failed"));
     let vec = memvec_push10(vec);
 
     let mut file = vec.into_mem().into_file();
     file.flush().expect("flush failed");
 
-    let vec = MemVec::from(MemVecFile::<Record41>::new(file).expect("mmap failed"));
+    let vec = MemVec::from(VecFile::<Record41>::new(file).expect("mmap failed"));
     memvec_check10(&vec);
 
     std::fs::remove_file(path).expect("delete fail");
