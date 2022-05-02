@@ -1,6 +1,6 @@
-use crate::mem_vec::Memory;
+use crate::memory::Memory;
 use core::ops::{Deref, DerefMut};
-use memmap2::*;
+use memmap2::{MmapMut, MmapOptions};
 use std::fs::File;
 
 pub struct MmapFile<'a> {
@@ -11,12 +11,8 @@ pub struct MmapFile<'a> {
 }
 
 impl<'a> MmapFile<'a> {
-    pub unsafe fn new(
-        file: File,
-        len: &'a mut usize,
-        data_options: MmapOptions,
-    ) -> std::io::Result<Self> {
-        let mmap = data_options.map_mut(&file)?;
+    pub fn new(file: File, len: &'a mut usize, data_options: MmapOptions) -> std::io::Result<Self> {
+        let mmap = unsafe { data_options.map_mut(&file) }?;
         Ok(Self {
             options: data_options,
             mmap,
@@ -27,6 +23,16 @@ impl<'a> MmapFile<'a> {
 
     pub fn into_file(self) -> File {
         self.file
+    }
+}
+
+impl<'a> core::fmt::Debug for MmapFile<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MmapFile")
+            .field("options", &self.options)
+            .field("len", &self.len)
+            .field("file", &self.file)
+            .finish()
     }
 }
 
@@ -48,7 +54,14 @@ impl<'a> Memory for MmapFile<'a>
 where
     Self: Deref<Target = [u8]> + DerefMut<Target = [u8]>,
 {
-    type Err = std::io::Error;
+    type Error = std::io::Error;
+
+    fn as_ptr(&self) -> *const u8 {
+        self.mmap.as_ptr()
+    }
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.mmap.as_mut_ptr()
+    }
 
     fn len(&self) -> usize {
         *self.len
@@ -74,8 +87,8 @@ where
         Ok(())
     }
 
-    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Err> {
-        let redundant_cap = self.deref().len().wrapping_sub(capacity);
+    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Error> {
+        let redundant_cap = self.mmap.len().wrapping_sub(capacity);
         if (redundant_cap as isize) < 0 {
             return Ok(());
         }
@@ -90,6 +103,14 @@ pub struct VecFile<'a> {
     mmap_file: MmapFile<'a>,
     #[allow(dead_code)]
     len_mmap: MmapMut,
+}
+
+impl<'a> core::fmt::Debug for VecFile<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VecFile")
+            .field("mmap_file", &self.mmap_file)
+            .finish()
+    }
 }
 
 impl<'a> VecFile<'a> {
@@ -115,7 +136,7 @@ impl<'a> VecFile<'a> {
         let mut data_options = MmapOptions::new();
         data_options.offset(HEADER_LEN);
 
-        let mut mmap_file = unsafe { MmapFile::new(file, len, data_options) }?;
+        let mut mmap_file = MmapFile::new(file, len, data_options)?;
         if need_init {
             *mmap_file.len_mut() = 0;
         }
@@ -148,7 +169,14 @@ impl<'a> Memory for VecFile<'a>
 where
     Self: Deref<Target = [u8]> + DerefMut<Target = [u8]>,
 {
-    type Err = std::io::Error;
+    type Error = std::io::Error;
+
+    fn as_ptr(&self) -> *const u8 {
+        self.mmap_file.as_ptr()
+    }
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.mmap_file.as_mut_ptr()
+    }
 
     fn len(&self) -> usize {
         self.mmap_file.len()
@@ -162,7 +190,7 @@ where
         self.mmap_file.reserve(capacity)
     }
 
-    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Err> {
+    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Error> {
         self.mmap_file.shrink(capacity)
     }
 }

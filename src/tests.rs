@@ -51,20 +51,19 @@ fn mmap_file() {
 
     let mut len: usize = 0;
     let mut data_options = MmapOptions::new();
-    data_options.offset(17); // header
-    let mmap = unsafe { MmapFile::new(file, &mut len, data_options).expect("mmap failed") };
+    data_options.offset(17); // random header
+    let mmap = MmapFile::new(file, &mut len, data_options.clone()).expect("mmap failed");
 
-    let vec: MemVec<Record41, _> = MemVec::from(mmap);
-    let vec = memvec_push10(vec);
+    let mut vec = unsafe { mmap.try_into_vec::<Record41>() }.unwrap();
+    memvec_push10(&mut vec);
 
     let mut file = vec.into_mem().into_file();
     file.flush().expect("flush failed");
 
-    let mut data_options = MmapOptions::new();
-    data_options.offset(17);
-    let mmap = unsafe { MmapFile::new(file, &mut len, data_options).expect("mmap failed") };
-    let vec: MemVec<Record41, _> = MemVec::from(mmap);
+    let mmap = MmapFile::new(file, &mut len, data_options).expect("mmap failed");
+    let mut vec = unsafe { mmap.try_into_vec::<Record41>() }.unwrap();
     memvec_check10(&vec);
+    memvec_shirink10(&mut vec);
 
     std::fs::remove_file(path).expect("delete fail");
 }
@@ -83,25 +82,27 @@ fn memvec_file() {
         .open(&path)
         .expect("file failed");
 
-    let vec = MemVec::<Record41, _>::from(VecFile::new(file).expect("mmap failed"));
-    let vec = memvec_push10(vec);
+    let vec_file = VecFile::new(file).expect("mmap failed");
+    let mut vec = unsafe { vec_file.try_into_vec::<Record41>() }.unwrap();
+    memvec_push10(&mut vec);
 
     let mut file = vec.into_mem().into_file();
     file.flush().expect("flush failed");
 
-    let vec = MemVec::<Record41, _>::from(VecFile::new(file).expect("mmap failed"));
+    let vec_file = VecFile::new(file).expect("mmap failed");
+    let mut vec = unsafe { vec_file.try_into_vec::<Record41>() }.unwrap();
     memvec_check10(&vec);
+    memvec_shirink10(&mut vec);
 
     std::fs::remove_file(path).expect("delete fail");
 }
 
-fn memvec_push10<T: Record, A: Memory>(mut vec: MemVec<T, A>) -> MemVec<T, A> {
+fn memvec_push10<T: Record, A: Memory>(vec: &mut MemVec<T, A>) {
     assert_eq!(vec.capacity(), 0);
     for i in 0..10 {
         vec.push(T::new(i));
     }
     assert!(vec.capacity() > 0);
-    vec
 }
 
 fn memvec_check10<T: Record, A: Memory>(vec: &MemVec<T, A>) {
@@ -113,4 +114,12 @@ fn memvec_check10<T: Record, A: Memory>(vec: &MemVec<T, A>) {
         assert!(item.validate(i));
     }
     for _ in vec {}
+}
+
+fn memvec_shirink10<T: Record, A: Memory>(vec: &mut MemVec<T, A>) {
+    assert_eq!(vec.len(), 10);
+    assert!(vec.capacity() > 10);
+
+    vec.shrink_to_fit();
+    assert_eq!(vec.capacity(), 10);
 }
