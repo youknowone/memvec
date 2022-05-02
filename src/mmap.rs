@@ -1,16 +1,14 @@
 use crate::mem_vec::Memory;
+use core::ops::{Deref, DerefMut};
 use memmap2::*;
-use std::{
-    fs::File,
-    ops::{Deref, DerefMut},
-};
+use std::fs::File;
 
 pub struct MmapFile<'a, T> {
     options: MmapOptions,
     mmap: MmapMut,
     len: &'a mut usize,
     file: File,
-    _marker: std::marker::PhantomData<T>,
+    _marker: core::marker::PhantomData<T>,
 }
 
 impl<'a, T> MmapFile<'a, T> {
@@ -29,7 +27,7 @@ impl<'a, T> MmapFile<'a, T> {
             mmap,
             len,
             file,
-            _marker: std::marker::PhantomData,
+            _marker: core::marker::PhantomData,
         })
     }
 
@@ -38,7 +36,7 @@ impl<'a, T> MmapFile<'a, T> {
     }
 }
 
-impl<'a, T> std::ops::Deref for MmapFile<'a, T> {
+impl<'a, T> core::ops::Deref for MmapFile<'a, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -51,7 +49,7 @@ impl<'a, T> std::ops::Deref for MmapFile<'a, T> {
     }
 }
 
-impl<'a, T> std::ops::DerefMut for MmapFile<'a, T> {
+impl<'a, T> core::ops::DerefMut for MmapFile<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
             let (prefix, slice, suffix) = self.mmap.deref_mut().align_to_mut::<T>();
@@ -81,7 +79,7 @@ where
         if (additional_cap as isize) < 0 {
             return Ok(());
         }
-        let additional_bytes = additional_cap * std::mem::size_of::<T>();
+        let additional_bytes = additional_cap * core::mem::size_of::<T>();
         let bytes_len = self.file.metadata()?.len() + additional_bytes as u64;
         self.file.set_len(bytes_len)?;
         self.mmap = unsafe { self.options.map_mut(&self.file)? };
@@ -93,7 +91,7 @@ where
         if (redundant_cap as isize) < 0 {
             return Ok(());
         }
-        let redundant_bytes = redundant_cap * std::mem::size_of::<T>();
+        let redundant_bytes = redundant_cap * core::mem::size_of::<T>();
         let bytes_len = self.file.metadata()?.len() - redundant_bytes as u64;
         self.file.set_len(bytes_len)?;
         self.mmap = unsafe { self.options.map_mut(&self.file)? };
@@ -109,7 +107,7 @@ pub struct VecFile<'a, T> {
 
 impl<'a, T> VecFile<'a, T> {
     pub fn new(file: File) -> std::io::Result<Self> {
-        const HEADER_LEN: u64 = std::mem::size_of::<u64>() as u64;
+        const HEADER_LEN: u64 = core::mem::size_of::<u64>() as u64;
 
         let need_init = file.metadata()?.len() == 0;
         if need_init {
@@ -145,7 +143,7 @@ impl<'a, T> VecFile<'a, T> {
     }
 }
 
-impl<'a, T> std::ops::Deref for VecFile<'a, T> {
+impl<'a, T> core::ops::Deref for VecFile<'a, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -153,7 +151,7 @@ impl<'a, T> std::ops::Deref for VecFile<'a, T> {
     }
 }
 
-impl<'a, T> std::ops::DerefMut for VecFile<'a, T> {
+impl<'a, T> core::ops::DerefMut for VecFile<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.mmap_file.deref_mut()
     }

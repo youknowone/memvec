@@ -29,7 +29,7 @@ impl Record for Record41 {
     }
 
     fn validate(&self, id: usize) -> bool {
-        let s = std::str::from_utf8(self.text.as_slice()).unwrap();
+        let s = core::str::from_utf8(self.text.as_slice()).unwrap();
         self.id == id as u8 && self.a == 9 && s.starts_with(&format!("FIELD: {}", id))
     }
 }

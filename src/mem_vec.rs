@@ -9,7 +9,7 @@ pub trait Memory<T>
 where
     Self: Deref<Target = [T]> + DerefMut<Target = [T]>,
 {
-    type Err: std::fmt::Debug;
+    type Err: core::fmt::Debug;
 
     fn len(&self) -> usize;
     fn len_mut(&mut self) -> &mut usize;
@@ -107,7 +107,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
     pub fn shrink_to(&mut self, min_capacity: usize) {
         if self.capacity() > min_capacity {
             self.mem
-                .shrink(std::cmp::max(self.len(), min_capacity))
+                .shrink(core::cmp::max(self.len(), min_capacity))
                 .expect("shrink failed");
         }
     }
@@ -462,7 +462,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
              * when `same_bucket` is guaranteed to not panic, this bloats a little
              * the codegen, so we just do it manually */
             gap.vec.set_len(gap.write);
-            std::mem::forget(gap);
+            core::mem::forget(gap);
         }
     }
 
@@ -526,7 +526,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         // This method is not implemented in terms of `split_at_spare_mut`,
         // to prevent invalidation of pointers to the buffer.
         unsafe {
-            std::slice::from_raw_parts_mut(
+            core::slice::from_raw_parts_mut(
                 self.as_mut_ptr().add(self.len()) as *mut MaybeUninit<T>,
                 self.capacity() - self.len(),
             )
@@ -570,9 +570,9 @@ fn capacity_overflow() -> usize {
 }
 
 impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
-    // pub(crate) const MIN_NON_ZERO_CAP: usize = if std::mem::size_of::<T>() == 1 {
+    // pub(crate) const MIN_NON_ZERO_CAP: usize = if core::mem::size_of::<T>() == 1 {
     //     8
-    // } else if std::mem::size_of::<T>() <= 1024 {
+    // } else if core::mem::size_of::<T>() <= 1024 {
     //     4
     // } else {
     //     1
@@ -607,7 +607,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         // This is ensured by the calling contexts.
         debug_assert!(additional > 0);
 
-        // if std::mem::size_of::<T>() == 0 {
+        // if core::mem::size_of::<T>() == 0 {
         //     // Since we return a capacity of `usize::MAX` when `elem_size` is
         //     // 0, getting to here necessarily means the `RawVec` is overfull.
         //     return Err(CapacityOverflow.into());
@@ -628,7 +628,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
     // `grow_amortized`, but this method is usually instantiated less often so
     // it's less critical.
     fn grow_exact(&mut self, len: usize, additional: usize) -> Result<(), A::Err> {
-        // if std::mem::size_of::<T>() == 0 {
+        // if core::mem::size_of::<T>() == 0 {
         //     // Since we return a capacity of `usize::MAX` when the type size is
         //     // 0, getting to here necessarily means the `RawVec` is overfull.
         //     return Err(CapacityOverflow.into());
