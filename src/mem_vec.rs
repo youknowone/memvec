@@ -1,13 +1,16 @@
 use core::{
+    cmp::Ordering,
+    hash::Hash,
     marker::PhantomData,
     mem::MaybeUninit,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Index, IndexMut},
     ptr,
+    slice::{self, SliceIndex},
 };
 
-pub trait Memory<T>
+pub trait Memory
 where
-    Self: Deref<Target = [T]> + DerefMut<Target = [T]>,
+    Self: Deref<Target = [u8]> + DerefMut<Target = [u8]>,
 {
     type Err: core::fmt::Debug;
 
@@ -20,36 +23,29 @@ where
 /// A memory-backed vector.
 ///
 /// See document of std::vec::Vec for each methods.
-pub struct MemVec<'a, T: Copy, A: 'a + Memory<T>> {
+pub struct MemVec<'a, T: Copy, A: 'a + Memory> {
     mem: A,
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T: Copy, A: 'a + Memory<T>> Deref for MemVec<'a, T, A> {
-    type Target = [T];
-    fn deref(&self) -> &Self::Target {
-        let len = self.mem.len();
-        unsafe { self.mem.deref().get_unchecked(..len) }
-    }
-}
-
-impl<'a, T: Copy, A: 'a + Memory<T>> DerefMut for MemVec<'a, T, A> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        let len = self.mem.len();
-        unsafe { self.mem.deref_mut().get_unchecked_mut(..len) }
-    }
-}
-
-impl<'a, T: Copy, A: 'a + Memory<T>> From<A> for MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory> From<A> for MemVec<'a, T, A> {
     fn from(mem: A) -> Self {
-        Self {
+        unsafe {
+            let (prefix, _, suffix) = mem.deref().align_to::<T>();
+            assert_eq!(prefix.len(), 0);
+            assert_eq!(suffix.len(), 0);
+        }
+
+        let vec = Self {
             mem,
             _marker: PhantomData,
-        }
+        };
+        assert!(vec.len() <= vec.mem.len());
+        vec
     }
 }
 
-impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     pub fn into_mem(self) -> A {
         self.mem
     }
@@ -62,10 +58,28 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
 }
 
 // std::vec::Vec methods
-impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
+impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
+    fn as_buf(&self) -> &[T] {
+        unsafe {
+            let (prefix, slice, suffix) = self.mem.deref().align_to::<T>();
+            debug_assert_eq!(prefix.len(), 0);
+            debug_assert_eq!(suffix.len(), 0);
+            slice
+        }
+    }
+
+    fn as_buf_mut(&mut self) -> &mut [T] {
+        unsafe {
+            let (prefix, slice, suffix) = self.mem.deref_mut().align_to_mut::<T>();
+            debug_assert_eq!(prefix.len(), 0);
+            debug_assert_eq!(suffix.len(), 0);
+            slice
+        }
+    }
+
     #[inline]
     pub fn capacity(&self) -> usize {
-        self.mem.len()
+        self.as_buf().len()
     }
 
     #[inline]
@@ -99,15 +113,19 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         // The capacity is never less than the length, and there's nothing to do when
         // they are equal, so we can avoid the panic case in `RawVec::shrink_to_fit`
         // by only calling it with a greater capacity.
-        if self.capacity() > self.len() {
-            self.mem.shrink(self.len()).expect("shrink failed");
+        let len = self.mem.len();
+        if self.capacity() > len {
+            self.mem
+                .shrink(len * core::mem::size_of::<T>())
+                .expect("shrink failed");
         }
     }
 
     pub fn shrink_to(&mut self, min_capacity: usize) {
         if self.capacity() > min_capacity {
+            let new_cap = core::cmp::max(self.len(), min_capacity);
             self.mem
-                .shrink(core::cmp::max(self.len(), min_capacity))
+                .shrink(new_cap * core::mem::size_of::<T>())
                 .expect("shrink failed");
         }
     }
@@ -129,21 +147,23 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
     }
 
     pub fn as_slice(&self) -> &[T] {
-        self.mem.deref()
+        let len = self.mem.len();
+        unsafe { self.as_buf().get_unchecked(..len) }
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        self.mem.deref_mut()
+        let len = self.mem.len();
+        unsafe { self.as_buf_mut().get_unchecked_mut(..len) }
     }
 
     #[inline]
     pub fn as_ptr(&self) -> *const T {
-        self.mem.deref().as_ptr()
+        self.as_buf().as_ptr()
     }
 
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut T {
-        self.mem.deref_mut().as_mut_ptr()
+        self.as_buf_mut().as_mut_ptr()
     }
 
     pub unsafe fn set_len(&mut self, len: usize) {
@@ -152,9 +172,9 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         fn assert_failed(len: usize, cap: usize) -> ! {
             panic!("`set_len` len (is {len}) should be <= cap (is {cap})");
         }
-        let cap = self.mem.len();
+        let cap = self.capacity();
         if !(len <= cap) {
-            assert_failed(len, self.capacity());
+            assert_failed(len, cap);
         }
         *self.mem.len_mut() = len;
     }
@@ -280,14 +300,14 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         // This drop guard will be invoked when predicate or `drop` of element panicked.
         // It shifts unchecked elements to cover holes and `set_len` to the correct length.
         // In cases when predicate and `drop` never panick, it will be optimized out.
-        struct BackshiftOnDrop<'a, 'v, T: Copy, A: Memory<T>> {
+        struct BackshiftOnDrop<'a, 'v, T: Copy, A: Memory> {
             v: &'a mut MemVec<'v, T, A>,
             processed_len: usize,
             deleted_cnt: usize,
             original_len: usize,
         }
 
-        impl<T: Copy, A: Memory<T>> Drop for BackshiftOnDrop<'_, '_, T, A> {
+        impl<T: Copy, A: Memory> Drop for BackshiftOnDrop<'_, '_, T, A> {
             fn drop(&mut self) {
                 if self.deleted_cnt > 0 {
                     // SAFETY: Trailing unchecked items must be valid since we never touch them.
@@ -315,7 +335,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
             original_len,
         };
 
-        fn process_loop<F, T: Copy, A: Memory<T>, const DELETED: bool>(
+        fn process_loop<F, T: Copy, A: Memory, const DELETED: bool>(
             original_len: usize,
             f: &mut F,
             g: &mut BackshiftOnDrop<'_, '_, T, A>,
@@ -379,7 +399,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         }
 
         /* INVARIANT: vec.len() > read >= write > write-1 >= 0 */
-        struct FillGapOnDrop<'a, 'b, T: Copy, A: Memory<T>> {
+        struct FillGapOnDrop<'a, 'b, T: Copy, A: Memory> {
             /* Offset of the element we want to check if it is duplicate */
             read: usize,
 
@@ -391,7 +411,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
             vec: &'a mut MemVec<'b, T, A>,
         }
 
-        impl<'a, 'b, T: Copy, A: Memory<T>> Drop for FillGapOnDrop<'a, 'b, T, A> {
+        impl<'a, 'b, T: Copy, A: Memory> Drop for FillGapOnDrop<'a, 'b, T, A> {
             fn drop(&mut self) {
                 /* This code gets executed when `same_bucket` panics */
                 /* SAFETY: invariant guarantees that `read - write`
@@ -532,11 +552,6 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
             )
         }
     }
-
-    #[inline]
-    pub fn ptr(&self) -> *mut T {
-        self.mem.deref() as *const _ as *mut T
-    }
 }
 
 trait ExtendWith<T> {
@@ -569,7 +584,14 @@ fn capacity_overflow() -> usize {
     panic!("capacity overflow");
 }
 
-impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
+impl<'a, T: Copy + std::cmp::PartialEq, A: 'a + Memory> MemVec<'a, T, A> {
+    #[inline]
+    pub fn dedup(&mut self) {
+        self.dedup_by(|a, b| a == b)
+    }
+}
+
+impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     // pub(crate) const MIN_NON_ZERO_CAP: usize = if core::mem::size_of::<T>() == 1 {
     //     8
     // } else if core::mem::size_of::<T>() <= 1024 {
@@ -578,13 +600,18 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
     //     1
     // };
 
+    #[inline]
+    fn ptr(&self) -> *mut T {
+        self.mem.deref() as *const _ as *mut T
+    }
+
     /// Returns if the buffer needs to grow to fulfill the needed extra capacity.
     /// Mainly used to make inlining reserve-calls possible without inlining `grow`.
     fn needs_to_grow(&self, len: usize, additional: usize) -> bool {
         additional > self.capacity().wrapping_sub(len)
     }
 
-    pub fn reserve_for_push(&mut self, len: usize) -> Result<(), A::Err> {
+    fn reserve_for_push(&mut self, len: usize) -> Result<(), A::Err> {
         self.grow_amortized(len, 1)
     }
 
@@ -621,7 +648,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         // This guarantees exponential growth. The doubling cannot overflow
         // because `cap <= isize::MAX` and the type of `cap` is `usize`.
         let cap = std::cmp::max(self.capacity() * 2, required_cap);
-        self.mem.reserve(cap)
+        self.mem.reserve(cap * core::mem::size_of::<T>())
     }
 
     // The constraints on this method are much the same as those on
@@ -637,7 +664,7 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         let cap = len
             .checked_add(additional)
             .unwrap_or_else(capacity_overflow);
-        self.mem.reserve(cap)
+        self.mem.reserve(cap * core::mem::size_of::<T>())
     }
 
     // fn shrink(&mut self, cap: usize) -> Result<(), TryReserveError> {
@@ -681,3 +708,99 @@ impl<'a, T: Copy, A: 'a + Memory<T>> MemVec<'a, T, A> {
         }
     }
 }
+
+impl<'a, T: Copy, A: 'a + Memory> Deref for MemVec<'a, T, A> {
+    type Target = [T];
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl<'a, T: Copy, A: 'a + Memory> DerefMut for MemVec<'a, T, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.as_mut_slice()
+    }
+}
+
+impl<'a, T: Copy + Hash, A: Memory> Hash for MemVec<'a, T, A> {
+    #[inline]
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        Hash::hash(&**self, state)
+    }
+}
+
+impl<'a, T: Copy, I: SliceIndex<[T]>, A: Memory> Index<I> for MemVec<'a, T, A> {
+    type Output = I::Output;
+
+    #[inline]
+    fn index(&self, index: I) -> &Self::Output {
+        Index::index(&**self, index)
+    }
+}
+
+impl<'a, T: Copy, I: SliceIndex<[T]>, A: Memory> IndexMut<I> for MemVec<'a, T, A> {
+    #[inline]
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        IndexMut::index_mut(&mut **self, index)
+    }
+}
+
+impl<'a, 'm, T: Copy, A: Memory> IntoIterator for &'a MemVec<'m, T, A> {
+    type Item = &'a T;
+    type IntoIter = slice::Iter<'a, T>;
+
+    fn into_iter(self) -> slice::Iter<'a, T> {
+        self.iter()
+    }
+}
+
+impl<'a, 'm, T: Copy, A: Memory> IntoIterator for &'a mut MemVec<'m, T, A> {
+    type Item = &'a mut T;
+    type IntoIter = slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> slice::IterMut<'a, T> {
+        self.iter_mut()
+    }
+}
+
+// impl<'a, T: Copy + Hash, A: Memory> Extend<T> for MemVec<'a, T, A> {
+//     #[inline]
+//     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+//         <Self as SpecExtend<T, I::IntoIter>>::spec_extend(self, iter.into_iter())
+//     }
+
+//     #[inline]
+//     fn extend_one(&mut self, item: T) {
+//         self.push(item);
+//     }
+
+//     #[inline]
+//     fn extend_reserve(&mut self, additional: usize) {
+//         self.reserve(additional);
+//     }
+// }
+
+// impl<'a, T: Copy + 'a, A: Allocator + 'a> Extend<&'a T> for Vec<T, A> {
+//     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+//         self.spec_extend(iter.into_iter())
+//     }
+
+//     #[inline]
+//     fn extend_one(&mut self, &item: &'a T) {
+//         self.push(item);
+//     }
+
+//     #[inline]
+//     fn extend_reserve(&mut self, additional: usize) {
+//         self.reserve(additional);
+//     }
+// }
+
+// impl<'a, T: PartialOrd, A: Memory> PartialOrd for MemVec<'a, T, A> {
+//     #[inline]
+//     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+//         PartialOrd::partial_cmp(&**self, &**other)
+//     }
+// }
+
+// impl<'a, T: Eq, A: Memory> Eq for MemVec<'a, T, A> {}
