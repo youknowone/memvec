@@ -24,6 +24,10 @@ impl<'a> MmapFile<'a> {
     pub fn into_file(self) -> File {
         self.file
     }
+
+    pub fn file(&self) -> &File {
+        &self.file
+    }
 }
 
 impl<'a> core::fmt::Debug for MmapFile<'a> {
@@ -114,7 +118,7 @@ impl<'a> core::fmt::Debug for VecFile<'a> {
 }
 
 impl<'a> VecFile<'a> {
-    pub fn from_path(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+    pub fn open(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
         let file = File::options()
             .read(true)
             .append(true)
@@ -156,6 +160,10 @@ impl<'a> VecFile<'a> {
 
     pub fn into_file(self) -> File {
         self.mmap_file.into_file()
+    }
+
+    pub fn file(&self) -> &File {
+        self.mmap_file.file()
     }
 }
 

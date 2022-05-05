@@ -20,7 +20,7 @@ fn main() {
     let mut path = std::env::temp_dir();
     path.push("vecfile.memvec");
 
-    let vec_file = VecFile::from_path(&path).expect("file open failed");
+    let vec_file = VecFile::open(&path).expect("file open failed");
     let mut vec =
         unsafe { MemVec::<Record, _>::try_from_memory(vec_file) }.expect("vec file is corrupted");
 
