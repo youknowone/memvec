@@ -76,13 +76,10 @@ where
     }
 
     fn reserve(&mut self, capacity: usize) -> std::io::Result<()> {
-        // use std::io::Write;
-
         let additional_cap = capacity.wrapping_sub(self.mmap.len());
         if (additional_cap as isize) < 0 {
             return Ok(());
         }
-        // self.file.flush().unwrap();
         let bytes_len = self.file.metadata()?.len() + additional_cap as u64;
         // eprintln!("new cap requested {} current {} gap {} total {}", capacity, self.deref().len(), additional_cap, bytes_len);
         self.file.set_len(bytes_len)?;
@@ -131,32 +128,46 @@ impl<'a> core::fmt::Debug for VecFile<'a> {
 impl<'a> VecFile<'a> {
     const HEADER_LEN: usize = core::mem::size_of::<u64>();
 
-    pub fn open(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+    pub fn open_or_create(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let path = path.as_ref();
         let file = File::options()
             .read(true)
-            .append(true)
+            .write(true)
             .create(true)
-            .open(path.as_ref())?;
-        Self::from_file(file)
-    }
-    pub fn from_file(file: File) -> std::io::Result<Self> {
-        const HEADER_LEN: u64 = core::mem::size_of::<u64>() as u64;
+            .open(path)?;
 
         let need_init = file.metadata()?.len() == 0;
         if need_init {
-            file.set_len(HEADER_LEN)?;
+            Self::clear(&file)?;
         };
 
+        Self::from_file(file)
+    }
+
+    pub fn open(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let path = path.as_ref();
+        let file = File::options().read(true).write(true).open(path)?;
+        Self::from_file(file)
+    }
+
+    /// Set header and the value of len to 0
+    pub fn clear(file: &File) -> std::io::Result<()> {
+        assert_eq!(0, file.metadata()?.len());
+        file.set_len(Self::HEADER_LEN as u64)?;
+        let len_mmap = Self::_len_mmap(file)?;
+        let len = unsafe { &mut *(len_mmap.deref().as_ptr() as *mut usize) };
+        *len = 0;
+        Ok(())
+    }
+
+    pub fn from_file(file: File) -> std::io::Result<Self> {
         let len_mmap = Self::_len_mmap(&file)?;
         let len = unsafe { &mut *(len_mmap.deref().as_ptr() as *mut usize) };
 
         let mut data_options = MmapOptions::new();
-        data_options.offset(HEADER_LEN);
+        data_options.offset(Self::HEADER_LEN as u64);
 
-        let mut mmap_file = MmapFile::new(file, len, data_options)?;
-        if need_init {
-            *mmap_file.len_mut() = 0;
-        }
+        let mmap_file = MmapFile::new(file, len, data_options)?;
         Ok(Self {
             mmap_file,
             len_mmap,

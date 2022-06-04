@@ -43,6 +43,8 @@ fn mmap_file() {
 
     eprintln!("path: {path:?}");
 
+    let _ = std::fs::remove_file(&path);
+
     let file = File::options()
         .read(true)
         .write(true)
@@ -66,7 +68,7 @@ fn mmap_file() {
     let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
     memvec_check10(&vec);
     vec.reserve(15);
-    memvec_shirink10(&mut vec);
+    memvec_shrink10(&mut vec);
     drop(vec);
 
     std::fs::remove_file(path).expect("delete fail");
@@ -81,26 +83,29 @@ fn memvec_file() {
 
     eprintln!("path: {path:?}");
 
-    let file = File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&path)
-        .expect("file failed");
-
-    let vec_file = VecFile::from_file(file).expect("mmap failed");
-    let mut vec = unsafe { vec_file.try_into_memvec::<Record41>() }.unwrap();
-    memvec_push10(&mut vec);
-
-    let mut file = vec.into_mem().into_file();
+    let mut file = {
+        let vec_file = VecFile::open_or_create(&path).expect("mmap failed");
+        let mut vec = unsafe { vec_file.try_into_memvec::<Record41>() }.unwrap();
+        memvec_push10(&mut vec);
+        vec.into_mem().into_file()
+    };
     file.flush().expect("flush failed");
 
-    let vec_file = VecFile::from_file(file).expect("mmap failed");
-    let mut vec = unsafe { vec_file.try_into_memvec::<Record41>() }.unwrap();
-    memvec_check10(&vec);
-    vec.reserve(15);
-    memvec_shirink10(&mut vec);
-    drop(vec);
+    {
+        let vec_file = VecFile::from_file(file).expect("mmap failed");
+        let mut vec = unsafe { vec_file.try_into_memvec::<Record41>() }.unwrap();
+        memvec_check10(&vec);
+        vec.reserve(15);
+        memvec_shrink10(&mut vec);
+    }
+
+    {
+        let vec_file = VecFile::open(&path).expect("mmap failed");
+        let mut vec = unsafe { MemVec::<Record41, _>::try_from_memory(vec_file) }.unwrap();
+        memvec_check10(&vec);
+        vec.reserve(15);
+        memvec_shrink10(&mut vec);
+    }
 
     std::fs::remove_file(path).expect("delete fail");
 }
@@ -124,7 +129,7 @@ fn memvec_check10<T: Record, A: Memory>(vec: &MemVec<T, A>) {
     for _ in vec {}
 }
 
-fn memvec_shirink10<T: Record, A: Memory>(vec: &mut MemVec<T, A>) {
+fn memvec_shrink10<T: Record, A: Memory>(vec: &mut MemVec<T, A>) {
     assert_eq!(vec.len(), 10);
     assert!(vec.capacity() > 10);
 

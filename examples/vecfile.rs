@@ -12,7 +12,7 @@ fn main() {
     let mut path = std::env::temp_dir();
     path.push("vecfile.memvec");
 
-    let vec_file = VecFile::open(&path).expect("file open failed");
+    let vec_file = VecFile::open_or_create(&path).expect("file open failed");
     let mut vec =
         unsafe { MemVec::<Record, _>::try_from_memory(vec_file) }.expect("vec file is corrupted");
 
@@ -29,11 +29,9 @@ fn main() {
     } else {
         // found an existing file
         for (i, item) in vec.iter().enumerate() {
-            println!(
-                "idx: {i} time: {time:?} event_id: {event_id}",
-                time = item.time,
-                event_id = item.event_id
-            );
+            let time = item.time;
+            let event_id = item.event_id;
+            println!("idx: {i} time: {time:?} event_id: {event_id}",);
         }
         vec.clear();
         println!("deleted existing file: {path:?}");
