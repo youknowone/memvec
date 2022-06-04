@@ -39,6 +39,8 @@ fn mmap_file() {
     let mut path = std::env::temp_dir();
     path.push("mmap.memvec");
 
+    let _ = std::fs::remove_file(&path);
+
     eprintln!("path: {path:?}");
 
     let file = File::options()
@@ -63,7 +65,9 @@ fn mmap_file() {
     let mmap = MmapFile::new(file, &mut len, data_options).expect("mmap failed");
     let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
     memvec_check10(&vec);
+    vec.reserve(15);
     memvec_shirink10(&mut vec);
+    drop(vec);
 
     std::fs::remove_file(path).expect("delete fail");
 }
@@ -72,6 +76,8 @@ fn mmap_file() {
 fn memvec_file() {
     let mut path = std::env::temp_dir();
     path.push("memvec.memvec");
+
+    let _ = std::fs::remove_file(&path);
 
     eprintln!("path: {path:?}");
 
@@ -92,7 +98,9 @@ fn memvec_file() {
     let vec_file = VecFile::from_file(file).expect("mmap failed");
     let mut vec = unsafe { vec_file.try_into_memvec::<Record41>() }.unwrap();
     memvec_check10(&vec);
+    vec.reserve(15);
     memvec_shirink10(&mut vec);
+    drop(vec);
 
     std::fs::remove_file(path).expect("delete fail");
 }
