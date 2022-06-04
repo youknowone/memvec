@@ -97,8 +97,19 @@ where
             return Ok(());
         }
         let bytes_len = self.file.metadata()?.len() - redundant_cap as u64;
-        self.file.set_len(bytes_len)?;
-        self.mmap = unsafe { self.options.map_mut(&self.file)? };
+        #[cfg(windows)]
+        {
+            self.mmap = MmapOptions::new().len(0).map_anon()?;
+
+            let set_len_result = self.file.set_len(bytes_len);
+            self.mmap = unsafe { self.options.map_mut(&self.file).expect("mmap is broken") };
+            set_len_result?;
+        }
+        #[cfg(not(windows))]
+        {
+            self.file.set_len(bytes_len)?;
+            self.mmap = unsafe { self.options.map_mut(&self.file)? };
+        }
         Ok(())
     }
 }
@@ -118,6 +129,8 @@ impl<'a> core::fmt::Debug for VecFile<'a> {
 }
 
 impl<'a> VecFile<'a> {
+    const HEADER_LEN: usize = core::mem::size_of::<u64>();
+
     pub fn open(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
         let file = File::options()
             .read(true)
@@ -133,17 +146,9 @@ impl<'a> VecFile<'a> {
         if need_init {
             file.set_len(HEADER_LEN)?;
         };
-        let mut len_options = MmapOptions::new();
-        len_options.len(HEADER_LEN as usize);
 
-        let len_mmap = unsafe { len_options.map_mut(&file) }?;
-        let len = {
-            let (prefix, body, suffix) = unsafe { len_mmap.deref().align_to::<u64>() };
-            assert_eq!(prefix.len(), 0);
-            assert_eq!(suffix.len(), 0);
-            assert_eq!(body.len(), 1);
-            unsafe { &mut *(body.as_ptr() as *mut usize) }
-        };
+        let len_mmap = Self::_len_mmap(&file)?;
+        let len = unsafe { &mut *(len_mmap.deref().as_ptr() as *mut usize) };
 
         let mut data_options = MmapOptions::new();
         data_options.offset(HEADER_LEN);
@@ -156,6 +161,21 @@ impl<'a> VecFile<'a> {
             mmap_file,
             len_mmap,
         })
+    }
+
+    fn _len_mmap(file: &File) -> std::io::Result<MmapMut> {
+        let mut len_options = MmapOptions::new();
+        len_options.len(Self::HEADER_LEN);
+        assert!(file.metadata()?.len() >= Self::HEADER_LEN as u64);
+        let len_mmap = unsafe { len_options.map_mut(file) }?;
+        {
+            // validation
+            let (prefix, body, suffix) = unsafe { len_mmap.deref().align_to::<u64>() };
+            assert_eq!(prefix.len(), 0);
+            assert_eq!(suffix.len(), 0);
+            assert_eq!(body.len(), 1);
+        }
+        Ok(len_mmap)
     }
 
     pub fn into_file(self) -> File {
@@ -206,7 +226,18 @@ where
         self.mmap_file.reserve(capacity)
     }
 
+    #[cfg(not(windows))]
     fn shrink(&mut self, capacity: usize) -> Result<(), Self::Error> {
         self.mmap_file.shrink(capacity)
+    }
+
+    #[cfg(windows)]
+    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Error> {
+        self.len_mmap = MmapOptions::new().len(0).map_anon()?;
+        let shrink_result = self.mmap_file.shrink(capacity);
+        self.len_mmap = Self::_len_mmap(self.file()).expect("broken mmap");
+        let remapped_len = self.len_mmap.deref().as_ptr() as *mut usize;
+        self.mmap_file.len = unsafe { &mut *remapped_len };
+        shrink_result
     }
 }
