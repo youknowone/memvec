@@ -84,7 +84,7 @@ fn memvec_file() {
     eprintln!("path: {path:?}");
 
     let mut file = {
-        let vec_file = VecFile::open_or_create(&path).expect("mmap failed");
+        let vec_file = VecFile::open_or_create(&path, |_v| Ok(())).expect("mmap failed");
         let mut vec = unsafe { vec_file.try_into_memvec::<Record41>() }.unwrap();
         memvec_push10(&mut vec);
         vec.into_mem().into_file()
