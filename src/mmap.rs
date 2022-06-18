@@ -1,7 +1,10 @@
 use crate::memory::Memory;
 use core::ops::{Deref, DerefMut};
 use memmap2::{MmapMut, MmapOptions};
-use std::fs::File;
+use std::{
+    fs::{File, OpenOptions},
+    path::Path,
+};
 
 pub struct MmapFile<'a> {
     options: MmapOptions,
@@ -128,25 +131,46 @@ impl<'a> core::fmt::Debug for VecFile<'a> {
 impl<'a> VecFile<'a> {
     const HEADER_LEN: usize = core::mem::size_of::<u64>();
 
-    pub fn open_or_create(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+    pub fn open_or_create(
+        path: impl AsRef<Path>,
+        init: impl FnOnce(&mut VecFile) -> Result<(), std::io::Error>,
+    ) -> std::io::Result<Self> {
         let path = path.as_ref();
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)?;
-
-        let need_init = file.metadata()?.len() == 0;
-        if need_init {
-            Self::clear(&file)?;
+        let existing = path.exists();
+        let file = if existing {
+            Self::_open(path, File::options().read(true).write(true))?
+        } else {
+            let mut file =
+                Self::_create(path, File::options().create(true).read(true).write(true))?;
+            if let Err(e) = init(&mut file) {
+                let _ = file;
+                let _ = std::fs::remove_file(path);
+                return Err(e);
+            }
+            file
         };
 
+        Ok(file)
+    }
+
+    pub fn create(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        Self::_create(path.as_ref(), File::options().create(true).write(true))
+    }
+
+    pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let mut options = File::options();
+        options.read(true).write(true);
+        Self::_open(path.as_ref(), &options)
+    }
+
+    fn _create(path: &Path, options: &OpenOptions) -> std::io::Result<Self> {
+        let file = options.open(path)?;
+        Self::clear(&file)?;
         Self::from_file(file)
     }
 
-    pub fn open(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
-        let path = path.as_ref();
-        let file = File::options().read(true).write(true).open(path)?;
+    fn _open(path: &Path, options: &OpenOptions) -> std::io::Result<Self> {
+        let file = options.open(path)?;
         Self::from_file(file)
     }
 
