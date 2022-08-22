@@ -2,7 +2,7 @@
 name = "memvec"
 version = "0.0.5"
 edition = "2021"
-license-file = "LICENSE"
+license = "BSD-2-Clause"
 homepage = "https://github.com/youknowone/memvec"
 repository = "https://github.com/youknowone/memvec.git"
 documentation = "https://docs.rs/memvec"
