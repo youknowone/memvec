@@ -1,6 +1,6 @@
 [package]
 name = "memvec"
-version = "0.0.5"
+version = "0.1.0"
 edition = "2021"
 license = "BSD-2-Clause"
 homepage = "https://github.com/youknowone/memvec"

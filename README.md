@@ -1,6 +1,8 @@
 # MemVec
 
-`MemVec` is a Vec-like interface for continuous memory buffer. Mostly intended to be used with `mmap`.
+`MemVec` is a Vec-like interface for continuous memory buffer. Mostly designed to be used with `mmap`.
+
+`VecFile` is a simple linear database. For the database, a file is a collection of records. `VecFile` is the Vec interface of a file of records without read, write, and seek but using mmap.
 
 
 ## VecFile + MemVec
