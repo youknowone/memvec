@@ -37,7 +37,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log.push(LogEntry {
         timestamp: 1640995200,
         level: 1, // INFO
-        message: *b"Server started successfully\0\0\0\0\0...", // pad to 128 bytes
+        message: {
+            let mut msg = [0u8; 128];
+            let text = b"Server started successfully";
+            msg[..text.len()].copy_from_slice(text);
+            msg
+        },
     });
 
     // Read back all entries (even from previous runs!)
