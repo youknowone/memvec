@@ -1,4 +1,4 @@
-use crate::memory::{Memory, MemoryConversionError};
+use crate::memory::{Memory, MemoryLayoutError};
 use core::{
     cmp::Ordering,
     hash::Hash,
@@ -8,9 +8,51 @@ use core::{
     ptr,
     slice::{self, SliceIndex},
 };
-/// A memory-backed vector.
+/// A memory-backed vector that provides a Vec-like interface over memory-mapped storage.
 ///
-/// See document of std::vec::Vec for copied methods
+/// `MemVec<T, A>` is a frontend that wraps any `Memory` backend (such as memory-mapped files
+/// or anonymous memory mappings) and exposes the familiar `Vec<T>` API. This allows you to
+/// work with persistent or high-performance memory using the same methods you know from
+/// standard vectors.
+///
+/// # Type Parameters
+///
+/// * `T` - The element type. Must implement `Copy` for zero-drop semantics.
+/// * `A` - The memory backend implementing the `Memory` trait (e.g., `VecFile`, `MmapAnon`).
+///
+/// # Examples
+///
+/// ```rust
+/// use memvec::{MemVec, MmapAnon};
+///
+/// #[derive(Copy, Clone)]
+/// struct Point { x: i32, y: i32 }
+///
+/// // Create with anonymous memory mapping
+/// let mmap = MmapAnon::with_capacity(1024)?;
+/// let mut vec = unsafe { MemVec::<Point, _>::try_from_memory(mmap).unwrap() };
+///
+/// // Use like a regular Vec
+/// vec.push(Point { x: 1, y: 2 });
+/// vec.push(Point { x: 3, y: 4 });
+/// assert_eq!(vec.len(), 2);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Safety
+///
+/// `MemVec` requires `unsafe` construction via `try_from_memory()` because it assumes
+/// the memory backend contains valid representations of `T`. The memory layout and
+/// alignment must be compatible with the target type.
+///
+/// # Performance
+///
+/// `MemVec` provides zero-copy access to the underlying memory. Operations like indexing,
+/// iteration, and slicing work directly on the memory-mapped data without additional
+/// copying or serialization overhead.
+///
+/// Many methods are identical to `std::vec::Vec` - see the Vec documentation for details
+/// on specific method behavior.
 pub struct MemVec<'a, T: Copy, A: 'a + Memory> {
     mem: A,
     _marker: PhantomData<&'a T>,
@@ -20,10 +62,10 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     /// Create a new memory-backed vector.
     /// # Safety
     /// The memory must represent valid len and bytes representations of T.
-    pub unsafe fn try_from_memory(mem: A) -> Result<Self, (A, MemoryConversionError)> {
+    pub unsafe fn try_from_memory(mem: A) -> Result<Self, (A, MemoryLayoutError)> {
         let (prefix, _, _suffix) = mem.deref().align_to::<T>();
         if !prefix.is_empty() {
-            return Err((mem, MemoryConversionError::AlignMismatch));
+            return Err((mem, MemoryLayoutError::MisalignedMemory));
         }
         // assert_eq!(_suffix.len(), 0);
 
@@ -33,7 +75,7 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         };
         if vec.len() > vec.capacity() {
             let mem = vec.into_mem();
-            return Err((mem, MemoryConversionError::SizeMismatch));
+            return Err((mem, MemoryLayoutError::CapacityExceeded));
         }
         Ok(vec)
     }

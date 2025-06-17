@@ -114,6 +114,98 @@ where
     }
 }
 
+/// A file-backed memory mapping that provides persistent Vec-like storage.
+///
+/// `VecFile` is the core feature of the memvec library, enabling you to use a disk file
+/// as if it were a vector in memory through memory-mapped I/O. All modifications are
+/// automatically persisted to disk, making it perfect for applications that need data
+/// to survive program restarts.
+///
+/// # File Format
+///
+/// VecFile uses a simple binary format:
+/// - **Header (8 bytes)**: Length of valid data as `u64`
+/// - **Data**: Raw bytes containing the vector elements
+///
+/// This format is portable across platforms and endianness-agnostic for basic types.
+///
+/// # Examples
+///
+/// ## Creating and Using a Persistent Vector
+///
+/// ```no_run
+/// use memvec::{MemVec, VecFile};
+///
+/// #[derive(Copy, Clone, Debug, PartialEq)]
+/// #[repr(C)]
+/// struct Record {
+///     id: u64,
+///     value: f64,
+/// }
+///
+/// // Create a new file-backed vector
+/// let file = VecFile::create("data.bin")?;
+/// let mut vec = unsafe { MemVec::<Record, _>::try_from_memory(file).unwrap() };
+///
+/// // Add data - automatically persisted!
+/// vec.push(Record { id: 1, value: 3.14 });
+/// vec.push(Record { id: 2, value: 2.71 });
+///
+/// // Data is immediately written to disk
+/// assert_eq!(vec.len(), 2);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// ## Loading Existing Data
+///
+/// ```no_run
+/// use memvec::{MemVec, VecFile};
+///
+/// #[derive(Copy, Clone)]
+/// #[repr(C)]
+/// struct Point { x: f32, y: f32 }
+///
+/// // Open existing file (created in previous program run)
+/// let file = VecFile::open("points.dat")?;
+/// let mut vec = unsafe { MemVec::<Point, _>::try_from_memory(file).unwrap() };
+///
+/// // Existing data is immediately available
+/// println!("Found {} existing points", vec.len());
+///
+/// // Continue working with persistent data
+/// vec.push(Point { x: 1.0, y: 2.0 });
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// ## Safe Creation with Initialization
+///
+/// ```rust
+/// use memvec::{MemVec, VecFile};
+/// use std::io;
+///
+/// #[derive(Copy, Clone)]
+/// #[repr(C)]
+/// struct Config { version: u32, flags: u32 }
+///
+/// // Create or open with initialization callback
+/// let file = VecFile::open_or_create("config.dat", |_vec_file| {
+///     // This closure runs only for new files
+///     // Initialize with default data here if needed
+///     Ok(())
+/// })?;
+///
+/// let vec = unsafe { MemVec::<Config, _>::try_from_memory(file).unwrap() };
+/// println!("Config file has {} entries", vec.len());
+/// # std::fs::remove_file("config.dat").ok();
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+//
+/// # Limitations
+///
+/// - Requires `Copy` types (no references, `String`, `Vec`, etc.)
+/// - File format is not self-describing (type information not stored)
+/// - Concurrent access from multiple processes requires external synchronization
+/// - Large files may consume virtual address space even if not fully loaded
 pub struct VecFile<'a> {
     mmap_file: MmapFile<'a>,
     #[allow(dead_code)]
@@ -131,6 +223,23 @@ impl<'a> core::fmt::Debug for VecFile<'a> {
 impl<'a> VecFile<'a> {
     const HEADER_LEN: usize = core::mem::size_of::<u64>();
 
+    /// Opens an existing file or creates a new one with initialization.
+    ///
+    /// If the file exists, it's opened and ready for use. If the file doesn't exist,
+    /// it's created and the `init` closure is called to set up initial data.
+    /// The closure receives a mutable reference to the `VecFile` for initialization.
+    ///
+    /// This is the safest way to create persistent data structures that need
+    /// default values when first created.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - File I/O operations fail
+    /// - The initialization closure returns an error
+    /// - The file cannot be memory-mapped
+    ///
+    /// If initialization fails, the newly created file is automatically deleted.
     pub fn open_or_create(
         path: impl AsRef<Path>,
         init: impl FnOnce(&mut VecFile) -> Result<(), std::io::Error>,
@@ -153,10 +262,29 @@ impl<'a> VecFile<'a> {
         Ok(file)
     }
 
+    /// Creates a new empty file-backed vector.
+    ///
+    /// The file is created with an empty header, ready to be used as a vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be created or memory-mapped.
     pub fn create(path: impl AsRef<Path>) -> std::io::Result<Self> {
         Self::_create(path.as_ref(), File::options().create(true).write(true))
     }
 
+    /// Opens an existing file-backed vector.
+    ///
+    /// The file must already exist and contain a valid VecFile header.
+    /// Any existing data in the file will be immediately accessible.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The file doesn't exist
+    /// - The file cannot be opened for reading and writing
+    /// - The file cannot be memory-mapped
+    /// - The file has invalid header format
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let mut options = File::options();
         options.read(true).write(true);
@@ -277,6 +405,15 @@ where
     }
 }
 
+/// Anonymous memory mapping for high-performance temporary storage.
+///
+/// `MmapAnon` provides a memory-mapped backend that doesn't use any files - instead,
+/// it allocates anonymous memory pages directly from the operating system. This makes
+/// it perfect for high-performance temporary data structures that need Vec-like behavior
+/// but with better memory management than standard heap allocation.
+///
+/// # Tip
+/// For testing code that uses VecFile, MmapAnon is convenient as a test substitute.
 pub struct MmapAnon {
     mmap: MmapMut,
     len: usize,
@@ -284,6 +421,61 @@ pub struct MmapAnon {
 }
 
 impl MmapAnon {
+    /// Creates a new anonymous memory mapping with the specified capacity.
+    ///
+    /// This is the simplest way to create an `MmapAnon` backend. The mapping starts
+    /// with zero length but has the specified capacity available for growth.
+    ///
+    /// # Arguments
+    ///
+    /// * `capacity` - The initial capacity in bytes. Must be non-zero.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use memvec::{MemVec, MmapAnon};
+    ///
+    /// #[derive(Copy, Clone)]
+    /// struct Point { x: f32, y: f32 }
+    ///
+    /// // Create mapping with capacity for ~1000 points
+    /// let mmap = MmapAnon::with_capacity(8000)?;
+    /// let mut vec = unsafe { MemVec::<Point, _>::try_from_memory(mmap).unwrap() };
+    ///
+    /// // Vector starts empty but can grow up to capacity
+    /// assert_eq!(vec.len(), 0);
+    /// vec.push(Point { x: 1.0, y: 2.0 });
+    /// assert_eq!(vec.len(), 1);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// Zero-Start Capacity
+    ///
+    /// ```rust
+    /// use memvec::{MemVec, MmapAnon};
+    /// use memmap2::MmapOptions;
+    ///
+    /// #[derive(Copy, Clone)]
+    /// struct Record { id: u32 }
+    ///
+    /// // Start with zero capacity - will grow as needed
+    /// let mut options = MmapOptions::new();
+    /// options.len(0);
+    /// let mmap = MmapAnon::with_options(options)?;
+    /// let mut vec = unsafe { MemVec::<Record, _>::try_from_memory(mmap).unwrap() };
+    ///
+    /// // Memory will be allocated on first push
+    /// vec.push(Record { id: 1 });
+    /// assert_eq!(vec.len(), 1);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the memory mapping cannot be created, typically due to:
+    /// - Insufficient virtual address space
+    /// - System limits on memory mappings
+    /// - Invalid capacity (e.g., zero or too large)
     pub fn with_capacity(capacity: usize) -> std::io::Result<Self> {
         let mut options = MmapOptions::new();
         let mmap = options.len(capacity).map_anon()?;
@@ -294,6 +486,51 @@ impl MmapAnon {
         })
     }
 
+    /// Creates a new anonymous memory mapping with custom options.
+    ///
+    /// This method allows full control over the memory mapping configuration,
+    /// including platform-specific optimizations like huge pages on Linux.
+    /// The `MmapOptions` should have `len()` called to set the desired capacity.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Pre-configured `MmapOptions` with desired settings
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use memvec::{MemVec, MmapAnon};
+    /// use memmap2::MmapOptions;
+    ///
+    /// #[derive(Copy, Clone)]
+    /// struct Data([u8; 64]);
+    ///
+    /// // Configure for high-performance access
+    /// let mut options = MmapOptions::new();
+    /// options.len(1024 * 1024); // 1MB
+    ///
+    /// // Platform-specific optimizations
+    /// #[cfg(target_os = "linux")]
+    /// {
+    ///     options.huge();     // Use huge pages
+    ///     options.populate(); // Pre-fault all pages
+    /// }
+    ///
+    /// let mmap = MmapAnon::with_options(options)?;
+    /// let mut vec = unsafe { MemVec::<Data, _>::try_from_memory(mmap).unwrap() };
+    ///
+    /// // Vector benefits from optimized memory mapping
+    /// vec.push(Data([42; 64]));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the memory mapping cannot be created with the specified
+    /// options. Common causes include:
+    /// - Unsupported options on the current platform
+    /// - Insufficient memory or virtual address space
+    /// - System limits exceeded
     pub fn with_options(options: MmapOptions) -> std::io::Result<Self> {
         let mmap = options.map_anon()?;
         Ok(Self {
