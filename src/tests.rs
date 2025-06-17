@@ -110,6 +110,48 @@ fn memvec_file() {
     std::fs::remove_file(path).expect("delete fail");
 }
 
+#[test]
+fn mmap_anon() {
+    let mmap = MmapAnon::with_capacity(0).expect("mmap anon failed");
+    let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
+    memvec_push10(&mut vec);
+    memvec_check10(&vec);
+    vec.reserve(15);
+    memvec_shrink10(&mut vec);
+}
+
+#[test]
+fn mmap_anon_with_capacity() {
+    let mmap = MmapAnon::with_capacity(500).expect("mmap anon failed");
+    let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
+    assert!(vec.capacity() >= 10);
+
+    for i in 0..10 {
+        vec.push(Record41::new(i));
+    }
+    assert!(vec.capacity() > 0);
+
+    memvec_check10(&vec);
+    vec.reserve(15);
+    memvec_shrink10(&mut vec);
+}
+
+#[test]
+fn mmap_anon_with_options() {
+    let mut options = MmapOptions::new();
+    #[cfg(target_os = "linux")]
+    options.populate();
+
+    let mmap = MmapAnon::with_options(options).expect("mmap anon failed");
+    let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
+
+    memvec_push10(&mut vec);
+
+    memvec_check10(&vec);
+    vec.reserve(15);
+    memvec_shrink10(&mut vec);
+}
+
 fn memvec_push10<T: Record, A: Memory>(vec: &mut MemVec<T, A>) {
     assert_eq!(vec.capacity(), 0);
     for i in 0..10 {

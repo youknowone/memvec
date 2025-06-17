@@ -108,8 +108,8 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         let len = self.mem.len();
         if self.capacity() > len {
             self.mem
-                .shrink(len * core::mem::size_of::<T>())
-                .expect("shrink failed");
+                .shrink_to(len * core::mem::size_of::<T>())
+                .expect("shrink_to failed");
         }
     }
 
@@ -117,8 +117,8 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         if self.capacity() > min_capacity {
             let new_cap = core::cmp::max(self.len(), min_capacity);
             self.mem
-                .shrink(new_cap * core::mem::size_of::<T>())
-                .expect("shrink failed");
+                .shrink_to(new_cap * core::mem::size_of::<T>())
+                .expect("shrink_to failed");
         }
     }
 
@@ -178,10 +178,7 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         #[cold]
         #[inline(never)]
         fn assert_failed(index: usize, len: usize) -> ! {
-            panic!(
-                "swap_remove index (is {}) should be < len (is {})",
-                index, len
-            );
+            panic!("swap_remove index (is {index}) should be < len (is {len})");
         }
 
         let len = self.len();
@@ -204,10 +201,7 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         #[cold]
         #[inline(never)]
         fn assert_failed(index: usize, len: usize) -> ! {
-            panic!(
-                "insertion index (is {}) should be <= len (is {})",
-                index, len
-            );
+            panic!("insertion index (is {index}) should be <= len (is {len})");
         }
 
         let len = self.len();
@@ -242,7 +236,7 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         #[inline(never)]
         #[track_caller]
         fn assert_failed(index: usize, len: usize) -> ! {
-            panic!("removal index (is {}) should be < len (is {})", index, len);
+            panic!("removal index (is {index}) should be < len (is {len})");
         }
 
         let len = self.len();
@@ -560,16 +554,6 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
 trait ExtendWith<T> {
     fn next(&mut self) -> T;
     fn last(self) -> T;
-}
-
-struct ExtendElement<T>(T);
-impl<T: Clone> ExtendWith<T> for ExtendElement<T> {
-    fn next(&mut self) -> T {
-        self.0.clone()
-    }
-    fn last(self) -> T {
-        self.0
-    }
 }
 
 struct ExtendFunc<F>(F);

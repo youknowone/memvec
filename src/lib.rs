@@ -7,4 +7,4 @@ mod tests;
 
 pub use mem_vec::MemVec;
 pub use memory::Memory;
-pub use mmap::{MmapFile, VecFile};
+pub use mmap::{MmapAnon, MmapFile, VecFile};

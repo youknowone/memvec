@@ -5,7 +5,9 @@
 `VecFile` is a simple linear database. For the database, a file is a collection of records. `VecFile` is the Vec interface of a file of records without read, write, and seek but using mmap.
 
 
-## VecFile + MemVec
+## Usage Examples
+
+### VecFile + MemVec (File-backed)
 
 ```rust
 use memvec::{MemVec, VecFile};
@@ -48,5 +50,36 @@ fn main() {
         vec.clear();
         println!("deleted existing file: {path:?}");
     }
+}
+```
+
+### Anonymous Memory Mapping (No File)
+
+```rust
+use memvec::{MemVec, MmapAnon};
+
+#[derive(Copy, Clone)]
+#[repr(C, packed)]
+struct Record {
+    id: u32,
+    data: [u8; 16],
+}
+
+fn main() {
+    // Create anonymous memory mapping (no file)
+    // Tip: Use `MmapAnon::with_options` for more options
+    let mmap = MmapAnon::with_capacity(1024).expect("mmap failed");
+
+    let mut vec = unsafe { MemVec::<Record, _>::try_from_memory(mmap) }.expect("memvec creation failed");
+
+    // Use like a regular Vec
+    for i in 0..10 {
+        vec.push(Record {
+            id: i,
+            data: [0; 16],
+        });
+    }
+
+    println!("Length: {}, Capacity: {}", vec.len(), vec.capacity());
 }
 ```

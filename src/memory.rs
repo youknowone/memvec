@@ -12,7 +12,7 @@ where
     fn len(&self) -> usize;
     fn len_mut(&mut self) -> &mut usize;
     fn reserve(&mut self, capacity: usize) -> Result<(), Self::Error>;
-    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Error>;
+    fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error>;
     /// Create a MemVec object with memory.
     /// # Safety
     /// The memory must represent valid len and bytes representations of T.

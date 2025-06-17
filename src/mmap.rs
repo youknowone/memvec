@@ -91,7 +91,7 @@ where
         Ok(())
     }
 
-    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Error> {
+    fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
         let redundant_cap = self.mmap.len().wrapping_sub(capacity);
         if (redundant_cap as isize) < 0 {
             return Ok(());
@@ -262,17 +262,139 @@ where
     }
 
     #[cfg(not(windows))]
-    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Error> {
-        self.mmap_file.shrink(capacity)
+    fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
+        self.mmap_file.shrink_to(capacity)
     }
 
     #[cfg(windows)]
-    fn shrink(&mut self, capacity: usize) -> Result<(), Self::Error> {
+    fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
         self.len_mmap = MmapOptions::new().len(0).map_anon()?;
-        let shrink_result = self.mmap_file.shrink(capacity);
+        let shrink_result = self.mmap_file.shrink_to(capacity);
         self.len_mmap = Self::_len_mmap(self.file()).expect("broken mmap");
         let remapped_len = self.len_mmap.deref().as_ptr() as *mut usize;
         self.mmap_file.len = unsafe { &mut *remapped_len };
         shrink_result
+    }
+}
+
+pub struct MmapAnon {
+    mmap: MmapMut,
+    len: usize,
+    options: MmapOptions,
+}
+
+impl MmapAnon {
+    pub fn with_capacity(capacity: usize) -> std::io::Result<Self> {
+        let mut options = MmapOptions::new();
+        let mmap = options.len(capacity).map_anon()?;
+        Ok(Self {
+            mmap,
+            len: 0,
+            options,
+        })
+    }
+
+    pub fn with_options(options: MmapOptions) -> std::io::Result<Self> {
+        let mmap = options.map_anon()?;
+        Ok(Self {
+            mmap,
+            len: 0,
+            options,
+        })
+    }
+}
+
+impl core::fmt::Debug for MmapAnon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MmapAnon")
+            .field("capacity", &self.mmap.len())
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
+impl core::ops::Deref for MmapAnon {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.mmap[..]
+    }
+}
+
+impl core::ops::DerefMut for MmapAnon {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.mmap[..]
+    }
+}
+
+impl Memory for MmapAnon
+where
+    Self: Deref<Target = [u8]> + DerefMut<Target = [u8]>,
+{
+    type Error = std::io::Error;
+
+    fn as_ptr(&self) -> *const u8 {
+        self.mmap.as_ptr()
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.mmap.as_mut_ptr()
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn len_mut(&mut self) -> &mut usize {
+        &mut self.len
+    }
+
+    fn reserve(&mut self, capacity: usize) -> std::io::Result<()> {
+        let current_capacity = self.mmap.len();
+        if capacity <= current_capacity {
+            return Ok(());
+        }
+
+        let options = self.options.len(capacity);
+        let new_mmap = options.map_anon()?;
+
+        let copy_bytes = self.mmap.len() * core::mem::size_of::<u8>();
+        if copy_bytes > 0 {
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    self.mmap.as_ptr(),
+                    new_mmap.as_ptr() as *mut u8,
+                    copy_bytes,
+                );
+            }
+        }
+
+        self.mmap = new_mmap;
+        Ok(())
+    }
+
+    fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
+        let current_capacity = self.mmap.len();
+        if capacity >= current_capacity {
+            return Ok(());
+        }
+
+        let new_capacity = core::cmp::max(capacity, self.len);
+        let options = self.options.len(new_capacity);
+        let new_mmap = options.map_anon()?;
+
+        let copy_len = core::cmp::min(self.len, new_capacity);
+        if copy_len > 0 {
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    self.mmap.as_ptr(),
+                    new_mmap.as_ptr() as *mut u8,
+                    copy_len,
+                );
+            }
+        }
+
+        self.mmap = new_mmap;
+        Ok(())
     }
 }

@@ -11,7 +11,7 @@ description = "Memory-backed vector, not buffer. Designed for for mmap. Not MemM
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-memmap2 = "0.5.3"
+memmap2 = "0.9.5"
 
 [dev-dependencies]
 static_assertions = "1.1.0"
