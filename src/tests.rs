@@ -176,6 +176,31 @@ fn memvec_shrink10<T: Record, A: Memory>(vec: &mut MemVec<T, A>) {
     assert_eq!(vec.len(), 10);
     assert!(vec.capacity() > 10);
 
+    // Store the last element for byte-level comparison
+    let last_element = vec[9];
+    let last_bytes = unsafe {
+        core::slice::from_raw_parts(
+            &last_element as *const T as *const u8,
+            core::mem::size_of::<T>(),
+        )
+    };
+
     vec.shrink_to_fit();
     assert_eq!(vec.capacity(), 10);
+
+    // Specifically verify the last element wasn't corrupted
+    assert!(vec[9].validate(9), "Last element corrupted after shrink");
+
+    // Verify the last element's data is byte-for-byte identical to what we stored
+    let current_last = vec[9];
+    let current_bytes = unsafe {
+        core::slice::from_raw_parts(
+            &current_last as *const T as *const u8,
+            core::mem::size_of::<T>(),
+        )
+    };
+    assert_eq!(
+        last_bytes, current_bytes,
+        "Last element data changed after shrink"
+    );
 }
