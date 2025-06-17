@@ -122,10 +122,6 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     /// speculatively avoid frequent reallocations. After calling `reserve`,
     /// capacity will be greater than or equal to `self.len() + additional`.
     /// Does nothing if capacity is already sufficient.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the new capacity exceeds `isize::MAX` bytes.
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
         self.try_reserve(additional).expect("reserve failed");
@@ -162,10 +158,6 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     /// minimal. Prefer [`reserve`] if future insertions are expected.
     ///
     /// [`reserve`]: MemVec::reserve
-    ///
-    /// # Panics
-    ///
-    /// Panics if the new capacity exceeds `isize::MAX` bytes.
     pub fn reserve_exact(&mut self, additional: usize) {
         self.try_reserve_exact(additional).expect("reserve failed");
     }

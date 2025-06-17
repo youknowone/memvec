@@ -597,7 +597,7 @@ where
         let options = self.options.len(capacity);
         let new_mmap = options.map_anon()?;
 
-        let copy_bytes = self.mmap.len() * core::mem::size_of::<u8>();
+        let copy_bytes = self.mmap.len();
         if copy_bytes > 0 {
             unsafe {
                 core::ptr::copy_nonoverlapping(
