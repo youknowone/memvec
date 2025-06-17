@@ -1,4 +1,4 @@
-use crate::memory::{Memory, MemoryConversionError};
+use crate::memory::{Memory, MemoryLayoutError};
 use core::{
     cmp::Ordering,
     hash::Hash,
@@ -8,9 +8,51 @@ use core::{
     ptr,
     slice::{self, SliceIndex},
 };
-/// A memory-backed vector.
+/// A memory-backed vector that provides a Vec-like interface over memory-mapped storage.
 ///
-/// See document of std::vec::Vec for copied methods
+/// `MemVec<T, A>` is a frontend that wraps any `Memory` backend (such as memory-mapped files
+/// or anonymous memory mappings) and exposes the familiar `Vec<T>` API. This allows you to
+/// work with persistent or high-performance memory using the same methods you know from
+/// standard vectors.
+///
+/// # Type Parameters
+///
+/// * `T` - The element type. Must implement `Copy` for zero-drop semantics.
+/// * `A` - The memory backend implementing the `Memory` trait (e.g., `VecFile`, `MmapAnon`).
+///
+/// # Examples
+///
+/// ```rust
+/// use memvec::{MemVec, MmapAnon};
+///
+/// #[derive(Copy, Clone)]
+/// struct Point { x: i32, y: i32 }
+///
+/// // Create with anonymous memory mapping
+/// let mmap = MmapAnon::with_size(1024)?;
+/// let mut vec = unsafe { MemVec::<Point, _>::try_from_memory(mmap).unwrap() };
+///
+/// // Use like a regular Vec
+/// vec.push(Point { x: 1, y: 2 });
+/// vec.push(Point { x: 3, y: 4 });
+/// assert_eq!(vec.len(), 2);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Safety
+///
+/// `MemVec` requires `unsafe` construction via `try_from_memory()` because it assumes
+/// the memory backend contains valid representations of `T`. The memory layout and
+/// alignment must be compatible with the target type.
+///
+/// # Performance
+///
+/// `MemVec` provides zero-copy access to the underlying memory. Operations like indexing,
+/// iteration, and slicing work directly on the memory-mapped data without additional
+/// copying or serialization overhead.
+///
+/// Many methods are identical to `std::vec::Vec` - see the Vec documentation for details
+/// on specific method behavior.
 pub struct MemVec<'a, T: Copy, A: 'a + Memory> {
     mem: A,
     _marker: PhantomData<&'a T>,
@@ -20,10 +62,10 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     /// Create a new memory-backed vector.
     /// # Safety
     /// The memory must represent valid len and bytes representations of T.
-    pub unsafe fn try_from_memory(mem: A) -> Result<Self, (A, MemoryConversionError)> {
+    pub unsafe fn try_from_memory(mem: A) -> Result<Self, (A, MemoryLayoutError)> {
         let (prefix, _, _suffix) = mem.deref().align_to::<T>();
         if !prefix.is_empty() {
-            return Err((mem, MemoryConversionError::AlignMismatch));
+            return Err((mem, MemoryLayoutError::MisalignedMemory));
         }
         // assert_eq!(_suffix.len(), 0);
 
@@ -33,7 +75,7 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         };
         if vec.len() > vec.capacity() {
             let mem = vec.into_mem();
-            return Err((mem, MemoryConversionError::SizeMismatch));
+            return Err((mem, MemoryLayoutError::CapacityExceeded));
         }
         Ok(vec)
     }
@@ -69,16 +111,32 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Returns the number of elements the vector can hold without reallocating.
     #[inline]
     pub fn capacity(&self) -> usize {
         self.as_buf().len()
     }
 
+    /// Reserves capacity for at least `additional` more elements to be inserted
+    /// in the given `Vec<T>`. The collection may reserve more space to
+    /// speculatively avoid frequent reallocations. After calling `reserve`,
+    /// capacity will be greater than or equal to `self.len() + additional`.
+    /// Does nothing if capacity is already sufficient.
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
         self.try_reserve(additional).expect("reserve failed");
     }
 
+    /// Tries to reserve capacity for at least `additional` more elements to be inserted
+    /// in the given `Vec<T>`. The collection may reserve more space to speculatively avoid
+    /// frequent reallocations. After calling `try_reserve`, capacity will be greater
+    /// than or equal to `self.len() + additional` if it returns `Ok(())`.
+    /// Does nothing if capacity is already sufficient.
+    ///
+    /// # Errors
+    ///
+    /// If the capacity overflows, or the allocator reports a failure, then an error
+    /// is returned.
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), A::Error> {
         let len = self.len();
         if self.needs_to_grow(len, additional) {
@@ -88,10 +146,39 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Reserves the minimum capacity for at least `additional` more elements to
+    /// be inserted in the given `Vec<T>`. Unlike [`reserve`], this will not
+    /// deliberately over-allocate to speculatively avoid frequent allocations.
+    /// After calling `reserve_exact`, capacity will be greater than or equal to
+    /// `self.len() + additional`. Does nothing if the capacity is already
+    /// sufficient.
+    ///
+    /// Note that the allocator may give the collection more space than it
+    /// requests. Therefore, capacity can not be relied upon to be precisely
+    /// minimal. Prefer [`reserve`] if future insertions are expected.
+    ///
+    /// [`reserve`]: MemVec::reserve
     pub fn reserve_exact(&mut self, additional: usize) {
         self.try_reserve_exact(additional).expect("reserve failed");
     }
 
+    /// Tries to reserve the minimum capacity for at least `additional`
+    /// elements to be inserted in the given `Vec<T>`. Unlike [`try_reserve`],
+    /// this will not deliberately over-allocate to speculatively avoid frequent
+    /// allocations. After calling `try_reserve_exact`, capacity will be greater
+    /// than or equal to `self.len() + additional` if it returns `Ok(())`.
+    /// Does nothing if the capacity is already sufficient.
+    ///
+    /// Note that the allocator may give the collection more space than it
+    /// requests. Therefore, capacity can not be relied upon to be precisely
+    /// minimal. Prefer [`try_reserve`] if future insertions are expected.
+    ///
+    /// [`try_reserve`]: MemVec::try_reserve
+    ///
+    /// # Errors
+    ///
+    /// If the capacity overflows, or the allocator reports a failure, then an error
+    /// is returned.
     pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), A::Error> {
         let len = self.len();
         if self.needs_to_grow(len, additional) {
@@ -101,6 +188,10 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Shrinks the capacity of the vector as much as possible.
+    ///
+    /// It will drop down as close as possible to the length but the allocator
+    /// may still inform the vector that there is space for a few more elements.
     pub fn shrink_to_fit(&mut self) {
         // The capacity is never less than the length, and there's nothing to do when
         // they are equal, so we can avoid the panic case in `RawVec::shrink_to_fit`
@@ -108,20 +199,34 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         let len = self.mem.len();
         if self.capacity() > len {
             self.mem
-                .shrink(len * core::mem::size_of::<T>())
-                .expect("shrink failed");
+                .shrink_to(len * core::mem::size_of::<T>())
+                .expect("shrink_to failed");
         }
     }
 
+    /// Shrinks the capacity of the vector with a lower bound.
+    ///
+    /// The capacity will remain at least as large as both the length
+    /// and the supplied value.
+    ///
+    /// If the current capacity is less than the lower limit, this is a no-op.
     pub fn shrink_to(&mut self, min_capacity: usize) {
         if self.capacity() > min_capacity {
             let new_cap = core::cmp::max(self.len(), min_capacity);
             self.mem
-                .shrink(new_cap * core::mem::size_of::<T>())
-                .expect("shrink failed");
+                .shrink_to(new_cap * core::mem::size_of::<T>())
+                .expect("shrink_to failed");
         }
     }
 
+    /// Shortens the vector, keeping the first `len` elements and dropping
+    /// the rest.
+    ///
+    /// If `len` is greater than the vector's current length, this has no
+    /// effect.
+    ///
+    /// Note that this method has no effect on the allocated capacity
+    /// of the vector.
     pub fn truncate(&mut self, len: usize) {
         if len > self.len() {
             return;
@@ -138,28 +243,68 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Extracts a slice containing the entire vector.
+    ///
+    /// Equivalent to `&s[..]`.
     pub fn as_slice(&self) -> &[T] {
         let len = self.mem.len();
         unsafe { self.as_buf().get_unchecked(..len) }
     }
 
+    /// Extracts a mutable slice of the entire vector.
+    ///
+    /// Equivalent to `&mut s[..]`.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         let len = self.mem.len();
         unsafe { self.as_buf_mut().get_unchecked_mut(..len) }
     }
 
+    /// Returns a raw pointer to the vector's buffer, or a dangling raw pointer
+    /// valid for zero sized reads if the vector didn't allocate.
+    ///
+    /// The caller must ensure that the vector outlives the pointer this
+    /// function returns, or else it will end up pointing to garbage.
+    /// Modifying the vector may cause its buffer to be reallocated,
+    /// which would also make any pointers to it invalid.
+    ///
+    /// The caller must also ensure that the memory the pointer (non-transitively) points to
+    /// is never written to (except inside an `UnsafeCell`) using this pointer or any pointer
+    /// derived from it. If you need to mutate the contents of the slice, use [`as_mut_ptr`].
+    ///
+    /// [`as_mut_ptr`]: MemVec::as_mut_ptr
     #[inline]
     pub fn as_ptr(&self) -> *const T {
         self.mem.as_ptr() as *const _
     }
 
+    /// Returns an unsafe mutable pointer to the vector's buffer, or a dangling
+    /// raw pointer valid for zero sized reads if the vector didn't allocate.
+    ///
+    /// The caller must ensure that the vector outlives the pointer this
+    /// function returns, or else it will end up pointing to garbage.
+    /// Modifying the vector may cause its buffer to be reallocated,
+    /// which would also make any pointers to it invalid.
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut T {
         self.mem.as_mut_ptr() as *mut _
     }
 
+    /// Forces the length of the vector to `new_len`.
+    ///
+    /// This is a low-level operation that maintains none of the normal
+    /// invariants of the type. Normally changing the length of a vector
+    /// is done using one of the safe operations instead, such as
+    /// [`truncate`] or [`clear`].
+    ///
+    /// [`truncate`]: MemVec::truncate
+    /// [`clear`]: MemVec::clear
+    ///
     /// # Safety
-    /// Same as Vec::set_len
+    ///
+    /// - `new_len` must be less than or equal to [`capacity()`].
+    /// - The elements at `old_len..new_len` must be initialized.
+    ///
+    /// [`capacity()`]: MemVec::capacity
     pub unsafe fn set_len(&mut self, len: usize) {
         #[cold]
         #[inline(never)]
@@ -173,15 +318,24 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         *self.mem.len_mut() = len;
     }
 
+    /// Removes an element from the vector and returns it.
+    ///
+    /// The removed element is replaced by the last element of the vector.
+    ///
+    /// This does not preserve ordering, but is *O*(1).
+    /// If you need to preserve the element order, use [`remove`] instead.
+    ///
+    /// [`remove`]: MemVec::remove
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline]
     pub fn swap_remove(&mut self, index: usize) -> T {
         #[cold]
         #[inline(never)]
         fn assert_failed(index: usize, len: usize) -> ! {
-            panic!(
-                "swap_remove index (is {}) should be < len (is {})",
-                index, len
-            );
+            panic!("swap_remove index (is {index}) should be < len (is {len})");
         }
 
         let len = self.len();
@@ -200,14 +354,17 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Inserts an element at position `index` within the vector, shifting all
+    /// elements after it to the right.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > len`.
     pub fn insert(&mut self, index: usize, element: T) {
         #[cold]
         #[inline(never)]
         fn assert_failed(index: usize, len: usize) -> ! {
-            panic!(
-                "insertion index (is {}) should be <= len (is {})",
-                index, len
-            );
+            panic!("insertion index (is {index}) should be <= len (is {len})");
         }
 
         let len = self.len();
@@ -236,13 +393,28 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Removes and returns the element at position `index` within the vector,
+    /// shifting all elements after it to the left.
+    ///
+    /// Note: Because this shifts over the remaining elements, it has a
+    /// worst-case performance of *O*(*n*). If you don't need the order of elements
+    /// to be preserved, use [`swap_remove`] instead. If you'd like to remove
+    /// elements from the beginning of the `Vec`, consider using
+    /// [`VecDeque::pop_front`] instead.
+    ///
+    /// [`swap_remove`]: MemVec::swap_remove
+    /// [`VecDeque::pop_front`]: std::collections::VecDeque::pop_front
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[track_caller]
     pub fn remove(&mut self, index: usize) -> T {
         #[cold]
         #[inline(never)]
         #[track_caller]
         fn assert_failed(index: usize, len: usize) -> ! {
-            panic!("removal index (is {}) should be < len (is {})", index, len);
+            panic!("removal index (is {index}) should be < len (is {len})");
         }
 
         let len = self.len();
@@ -267,6 +439,11 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all elements `e` for which `f(&e)` returns `false`.
+    /// This method operates in place, visiting each element exactly once in the
+    /// original order, and preserves the order of the retained elements.
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&T) -> bool,
@@ -274,6 +451,11 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         self.retain_mut(|elem| f(elem));
     }
 
+    /// Retains only the elements specified by the predicate, passing a mutable reference to it.
+    ///
+    /// In other words, remove all elements `e` such that `f(&mut e)` returns `false`.
+    /// This method operates in place, visiting each element exactly once in the
+    /// original order, and preserves the order of the retained elements.
     pub fn retain_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut T) -> bool,
@@ -374,6 +556,10 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         drop(g);
     }
 
+    /// Removes all but the first of consecutive elements in the vector that resolve to the same
+    /// key.
+    ///
+    /// If the vector is sorted, this removes all duplicates.
     #[inline]
     pub fn dedup_by_key<F, K>(&mut self, mut key: F)
     where
@@ -383,6 +569,14 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         self.dedup_by(|a, b| key(a) == key(b))
     }
 
+    /// Removes all but the first of consecutive elements in the vector satisfying a given equality
+    /// relation.
+    ///
+    /// The `same_bucket` function is passed references to two elements from the vector and
+    /// must determine if the elements compare equal. The elements are passed in opposite order
+    /// from their order in the slice, so if `same_bucket(a, b)` returns `true`, `a` is removed.
+    ///
+    /// If the vector is sorted, this removes all duplicates.
     pub fn dedup_by<F>(&mut self, mut same_bucket: F)
     where
         F: FnMut(&mut T, &mut T) -> bool,
@@ -480,6 +674,11 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Appends an element to the back of a collection.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new capacity exceeds `isize::MAX` bytes.
     #[inline]
     pub fn push(&mut self, value: T) {
         if self.len() == self.capacity() {
@@ -492,6 +691,8 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Removes the last element from a vector and returns it, or [`None`] if it
+    /// is empty.
     #[inline]
     pub fn pop(&mut self) -> Option<T> {
         if self.mem.len() == 0 {
@@ -515,22 +716,40 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
 
     // drain
 
+    /// Clears the vector, removing all values.
+    ///
+    /// Note that this method has no effect on the allocated capacity
+    /// of the vector.
     #[inline]
     pub fn clear(&mut self) {
         self.truncate(0)
     }
 
+    /// Returns the number of elements in the vector, also referred to
+    /// as its 'length'.
     #[inline]
     pub fn len(&self) -> usize {
         self.mem.len()
     }
 
+    /// Returns `true` if the vector contains no elements.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    #[cfg(not(no_global_oom_handling))]
+    /// Resizes the `Vec` in-place so that `len` is equal to `new_len`.
+    ///
+    /// If `new_len` is greater than `len`, the `Vec` is extended by the
+    /// difference, with each additional slot filled by calling the closure `f`.
+    /// The return values from `f` will end up in the `Vec` in the order they
+    /// have been generated.
+    ///
+    /// If `new_len` is less than `len`, the `Vec` is simply truncated.
+    ///
+    /// This method uses a closure to create new values on every push. If you
+    /// want to use the [`Default`] trait to generate values, you can
+    /// pass [`Default::default`] as the second argument.
     pub fn resize_with<F>(&mut self, new_len: usize, f: F)
     where
         F: FnMut() -> T,
@@ -543,6 +762,14 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Returns the remaining spare capacity of the vector as a slice of
+    /// `MaybeUninit<T>`.
+    ///
+    /// The returned slice can be used to fill the vector with data (e.g. by
+    /// reading from a file) before marking the data as initialized using the
+    /// [`set_len`] method.
+    ///
+    /// [`set_len`]: MemVec::set_len
     #[inline]
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         // Note:
@@ -562,16 +789,6 @@ trait ExtendWith<T> {
     fn last(self) -> T;
 }
 
-struct ExtendElement<T>(T);
-impl<T: Clone> ExtendWith<T> for ExtendElement<T> {
-    fn next(&mut self) -> T {
-        self.0.clone()
-    }
-    fn last(self) -> T {
-        self.0
-    }
-}
-
 struct ExtendFunc<F>(F);
 impl<T, F: FnMut() -> T> ExtendWith<T> for ExtendFunc<F> {
     fn next(&mut self) -> T {
@@ -582,12 +799,15 @@ impl<T, F: FnMut() -> T> ExtendWith<T> for ExtendFunc<F> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 fn capacity_overflow() -> usize {
     panic!("capacity overflow");
 }
 
 impl<'a, T: Copy + std::cmp::PartialEq, A: 'a + Memory> MemVec<'a, T, A> {
+    /// Removes consecutive repeated elements in the vector according to the
+    /// [`PartialEq`] trait implementation.
+    ///
+    /// If the vector is sorted, this removes all duplicates.
     #[inline]
     pub fn dedup(&mut self) {
         self.dedup_by(|a, b| a == b)
@@ -666,7 +886,7 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
 
             if n > 0 {
                 // We can write the last element directly without cloning needlessly
-                std::ptr::write(ptr, value.last());
+                core::ptr::write(ptr, value.last());
                 *self.mem.len_mut() += 1;
             }
 
