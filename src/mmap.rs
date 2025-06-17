@@ -613,22 +613,22 @@ where
     }
 
     fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
-        let current_capacity = self.mmap.len();
-        if capacity >= current_capacity {
+        let len = self.mmap.len();
+        let redundant_cap = len.wrapping_sub(capacity);
+        if (redundant_cap as isize) < 0 {
             return Ok(());
         }
 
-        let new_capacity = core::cmp::max(capacity, self.len);
+        let new_capacity = len - redundant_cap;
         let options = self.options.len(new_capacity);
         let new_mmap = options.map_anon()?;
 
-        let copy_len = core::cmp::min(self.len, new_capacity);
-        if copy_len > 0 {
+        if new_capacity > 0 {
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     self.mmap.as_ptr(),
                     new_mmap.as_ptr() as *mut u8,
-                    copy_len,
+                    new_capacity,
                 );
             }
         }
