@@ -35,7 +35,29 @@ where
 
     /// Create a MemVec object with memory.
     /// # Safety
-    /// The memory must represent valid len and bytes representations of T.
+    /// Attempts to convert the memory into a `MemVec` of type `T`.
+    ///
+    /// # Safety
+    ///
+    /// The memory must contain a valid representation of elements of type `T`, with correct alignment and length. If these conditions are not met, the behavior is undefined.
+    ///
+    /// Returns a `MemVec` if the conversion succeeds, or the original memory and a `MemoryLayoutError` if the layout is invalid (e.g., misaligned memory or capacity exceeded).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err((self, MemoryLayoutError))` if the memory is not properly aligned for `T` or if the logical length exceeds the memory's capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use your_crate::{Memory, MemVec, MemoryLayoutError};
+    /// // Assume `mem` implements `Memory`
+    /// let result = unsafe { mem.try_into_memvec::<u32>() };
+    /// match result {
+    ///     Ok(memvec) => { /* use memvec */ }
+    ///     Err((original_mem, err)) => { /* handle error */ }
+    /// }
+    /// ```
     unsafe fn try_into_memvec<'a, T: Copy>(
         self,
     ) -> Result<MemVec<'a, T, Self>, (Self, MemoryLayoutError)>
@@ -71,6 +93,17 @@ pub enum MemoryLayoutError {
 }
 
 impl core::fmt::Display for MemoryLayoutError {
+    /// Formats the `MemoryLayoutError` as a human-readable message.
+    ///
+    /// This implementation provides descriptive error messages for each variant of `MemoryLayoutError` when used with formatting macros.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::MemoryLayoutError;
+    /// assert_eq!(format!("{}", MemoryLayoutError::MisalignedMemory), "memory is not properly aligned for the target type");
+    /// assert_eq!(format!("{}", MemoryLayoutError::CapacityExceeded), "logical length exceeds available memory capacity");
+    /// ```
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             MemoryLayoutError::MisalignedMemory => {

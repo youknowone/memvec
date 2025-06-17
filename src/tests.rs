@@ -75,6 +75,11 @@ fn mmap_file() {
 }
 
 #[test]
+/// Tests file-backed memory-mapped vector operations using `VecFile` and `MemVec<Record41>`.
+///
+/// This test creates or opens a file-backed vector, pushes 10 records, flushes and reopens the file,
+/// validates the records, manages capacity, and ensures proper cleanup by deleting the file. Multiple
+/// access patterns are exercised to verify correct persistence and memory mapping behavior.
 fn memvec_file() {
     let mut path = std::env::temp_dir();
     path.push("memvec.memvec");
@@ -121,6 +126,15 @@ fn mmap_anon() {
 }
 
 #[test]
+/// Tests creating a memory-mapped vector from an anonymous memory map with a specified size.
+///
+/// Creates an anonymous memory map of 500 bytes, converts it into a `MemVec<Record41>`, pushes 10 records, validates them, reserves additional capacity, and shrinks the vector to fit.
+///
+/// # Examples
+///
+/// ```
+/// mmap_anon_with_size();
+/// ```
 fn mmap_anon_with_size() {
     let mmap = MmapAnon::with_size(500).expect("mmap anon failed");
     let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
@@ -137,6 +151,9 @@ fn mmap_anon_with_size() {
 }
 
 #[test]
+/// Tests creating an anonymous memory map with custom options and verifies vector operations.
+///
+/// This test configures a `MmapOptions` instance (enabling population on Linux), creates an anonymous memory map with those options, converts it into a `MemVec<Record41>`, and exercises push, validation, reserve, and shrink operations.
 fn mmap_anon_with_options() {
     #[allow(unused_mut)]
     let mut options = MmapOptions::new();
@@ -153,6 +170,17 @@ fn mmap_anon_with_options() {
     memvec_shrink10(&mut vec);
 }
 
+/// Pushes 10 new records with sequential IDs into the provided memory-backed vector.
+///
+/// The function asserts that the vector initially has zero capacity, then pushes records with IDs 0 through 9, and finally asserts that the capacity has increased.
+///
+/// # Examples
+///
+/// ```
+/// let mut vec = MemVec::<Record41, MmapAnon>::new();
+/// memvec_push10(&mut vec);
+/// assert_eq!(vec.len(), 10);
+/// ```
 fn memvec_push10<T: Record, A: Memory>(vec: &mut MemVec<T, A>) {
     assert_eq!(vec.capacity(), 0);
     for i in 0..10 {

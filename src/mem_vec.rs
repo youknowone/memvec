@@ -61,7 +61,29 @@ pub struct MemVec<'a, T: Copy, A: 'a + Memory> {
 impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     /// Create a new memory-backed vector.
     /// # Safety
-    /// The memory must represent valid len and bytes representations of T.
+    /// Attempts to construct a `MemVec` from a memory backend, validating alignment and length.
+    ///
+    /// The provided memory must be properly aligned for `T` and contain valid length and capacity representations. Returns an error with the memory backend if alignment is incorrect or if the stored length exceeds capacity.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the memory backend contains a valid representation for a `MemVec`, including correct alignment and initialized metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err((mem, MemoryLayoutError::MisalignedMemory))` if the memory is not aligned for `T`, or `Err((mem, MemoryLayoutError::CapacityExceeded))` if the stored length exceeds capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use your_crate::{MemVec, Memory, MemoryLayoutError};
+    /// # let mem = /* obtain a memory backend implementing Memory */;
+    /// let result = unsafe { MemVec::<u32, _>::try_from_memory(mem) };
+    /// match result {
+    ///     Ok(vec) => { /* use vec */ }
+    ///     Err((mem, err)) => { /* handle error */ }
+    /// }
+    /// ```
     pub unsafe fn try_from_memory(mem: A) -> Result<Self, (A, MemoryLayoutError)> {
         let (prefix, _, _suffix) = mem.deref().align_to::<T>();
         if !prefix.is_empty() {
@@ -143,6 +165,20 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Shrinks the memory backing the vector to fit its current length.
+    ///
+    /// Reduces the allocated capacity to match the number of elements, freeing unused memory.
+    /// Does nothing if the capacity already equals the length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vec = MemVec::<u32, _>::with_capacity(10);
+    /// vec.push(1);
+    /// vec.push(2);
+    /// vec.shrink_to_fit();
+    /// assert_eq!(vec.capacity(), 2);
+    /// ```
     pub fn shrink_to_fit(&mut self) {
         // The capacity is never less than the length, and there's nothing to do when
         // they are equal, so we can avoid the panic case in `RawVec::shrink_to_fit`
@@ -155,6 +191,22 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Shrinks the capacity of the vector's underlying memory to at least `min_capacity` elements.
+    ///
+    /// If the current capacity exceeds `min_capacity`, the memory backend is shrunk to fit either the current length or `min_capacity`, whichever is greater. This may reduce memory usage but will not drop elements.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying memory backend fails to shrink.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vec = MemVec::<u32, _>::with_capacity(10, MyMemoryBackend::new());
+    /// vec.extend_from_slice(&[1, 2, 3]);
+    /// vec.shrink_to(2);
+    /// assert!(vec.capacity() >= 3 && vec.capacity() <= 10);
+    /// ```
     pub fn shrink_to(&mut self, min_capacity: usize) {
         if self.capacity() > min_capacity {
             let new_cap = core::cmp::max(self.len(), min_capacity);
@@ -216,6 +268,19 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     }
 
     #[inline]
+    /// Removes and returns the element at the specified index, replacing it with the last element.
+    ///
+    /// The removed element is returned. This operation does not preserve ordering but is O(1).
+    /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vec = MemVec::from_slice(&[1, 2, 3, 4]);
+    /// let removed = vec.swap_remove(1);
+    /// assert_eq!(removed, 2);
+    /// assert_eq!(vec.as_slice(), &[1, 4, 3]);
+    /// ```
     pub fn swap_remove(&mut self, index: usize) -> T {
         #[cold]
         #[inline(never)]
@@ -239,6 +304,19 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         }
     }
 
+    /// Inserts an element at the specified index, shifting subsequent elements to the right.
+    ///
+    /// Panics if `index` is greater than the current length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut v = MemVec::<u32, _>::try_from_memory(MyMemoryBackend::with_capacity(4)).unwrap();
+    /// v.push(1);
+    /// v.push(2);
+    /// v.insert(1, 99);
+    /// assert_eq!(&v[..], &[1, 99, 2]);
+    /// ```
     pub fn insert(&mut self, index: usize, element: T) {
         #[cold]
         #[inline(never)]
@@ -273,6 +351,21 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     }
 
     #[track_caller]
+    /// Removes and returns the element at the specified index, shifting all subsequent elements down.
+    ///
+    /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vec = MemVec::try_from_memory(MyMemoryBackend::with_capacity(4)).unwrap();
+    /// vec.push(10);
+    /// vec.push(20);
+    /// vec.push(30);
+    /// let removed = vec.remove(1);
+    /// assert_eq!(removed, 20);
+    /// assert_eq!(vec.as_slice(), &[10, 30]);
+    /// ```
     pub fn remove(&mut self, index: usize) -> T {
         #[cold]
         #[inline(never)]
@@ -562,10 +655,34 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
     }
 
     #[inline]
+    /// Returns `true` if the vector contains no elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut v = MemVec::<u32, _>::try_from_memory(MyMemoryBackend::new(10)).unwrap();
+    /// assert!(v.is_empty());
+    /// v.push(1);
+    /// assert!(!v.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Resizes the vector to the specified length, using a closure to generate new elements if needed.
+    ///
+    /// If `new_len` is greater than the current length, the vector is extended by calling the provided closure for each additional element. If `new_len` is less than the current length, the vector is truncated to `new_len`, dropping elements from the end.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut v = MemVec::<_, u32, _>::default();
+    /// v.push(1);
+    /// v.resize_with(3, || 42);
+    /// assert_eq!(&v[..], &[1, 42, 42]);
+    /// v.resize_with(1, || 0);
+    /// assert_eq!(&v[..], &[1]);
+    /// ```
     pub fn resize_with<F>(&mut self, new_len: usize, f: F)
     where
         F: FnMut() -> T,
@@ -599,14 +716,25 @@ trait ExtendWith<T> {
 
 struct ExtendFunc<F>(F);
 impl<T, F: FnMut() -> T> ExtendWith<T> for ExtendFunc<F> {
+    /// Calls the underlying function to generate the next value.
+    ///
+    /// # Returns
+    ///
+    /// The next value produced by the wrapped function.
     fn next(&mut self) -> T {
         (self.0)()
     }
+    /// Returns the last element produced by the iterator-like closure.
+    ///
+    /// Consumes the wrapper and invokes the inner closure to obtain the final value.
     fn last(mut self) -> T {
         (self.0)()
     }
 }
 
+/// Panics to indicate that a capacity overflow has occurred.
+///
+/// This function should be called when an operation would exceed the maximum allowed capacity for a vector-like container. It does not return and always panics with a "capacity overflow" message.
 fn capacity_overflow() -> usize {
     panic!("capacity overflow");
 }
@@ -674,7 +802,22 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         self.mem.reserve(cap * core::mem::size_of::<T>())
     }
 
-    /// Extend the vector by `n` values, using the given generator.
+    /// Extends the vector by appending `n` elements generated by the provided generator.
+    ///
+    /// The generator is called once for each new element. If a panic occurs during element generation,
+    /// the vector's length is updated to include all successfully written elements.
+    ///
+    /// # Parameters
+    /// - `n`: Number of elements to append.
+    /// - `value`: Generator implementing `ExtendWith<T>` to produce new elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut v = MemVec::<u32, _>::new_in(mem_backend);
+    /// v.extend_with(3, ExtendFunc(|| 42));
+    /// assert_eq!(v.as_slice(), &[42, 42, 42]);
+    /// ```
     fn extend_with<E: ExtendWith<T>>(&mut self, n: usize, mut value: E) {
         self.reserve(n);
 

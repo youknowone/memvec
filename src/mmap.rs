@@ -78,6 +78,13 @@ where
         self.len
     }
 
+    /// Ensures the memory-mapped file has at least the specified capacity, remapping if necessary.
+    ///
+    /// If the requested capacity exceeds the current mapping, the underlying file is extended and the memory mapping is updated. If the capacity is already sufficient, no action is taken.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if resizing the file or remapping the memory fails.
     fn reserve(&mut self, capacity: usize) -> std::io::Result<()> {
         let additional_cap = capacity.wrapping_sub(self.mmap.len());
         if (additional_cap as isize) < 0 {
@@ -91,6 +98,13 @@ where
         Ok(())
     }
 
+    /// Shrinks the underlying file and remaps the memory region to the specified capacity.
+    ///
+    /// If the requested capacity is greater than or equal to the current mapping size, no action is taken. On success, the file is truncated and the memory mapping is updated to match the new size. Platform-specific logic is used to handle remapping on Windows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if file truncation or remapping fails.
     fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
         let redundant_cap = self.mmap.len().wrapping_sub(capacity);
         if (redundant_cap as isize) < 0 {
@@ -239,7 +253,25 @@ impl<'a> VecFile<'a> {
     /// - The initialization closure returns an error
     /// - The file cannot be memory-mapped
     ///
-    /// If initialization fails, the newly created file is automatically deleted.
+    /// Opens an existing file-backed vector or creates a new one, running an initialization closure on creation.
+    ///
+    /// If the file does not exist, it is created and the provided `init` closure is called with a mutable reference to the new `VecFile`. If initialization fails, the newly created file is deleted and the error is returned. If the file already exists, it is opened without running the initializer.
+    ///
+    /// # Parameters
+    /// - `path`: Path to the file to open or create.
+    /// - `init`: Closure to initialize the vector if the file is newly created.
+    ///
+    /// # Returns
+    /// Returns a `VecFile` mapped to the specified file, or an error if opening, creation, or initialization fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let vec_file = VecFile::open_or_create("data.bin", |v| {
+    ///     // Optionally initialize the vector contents
+    ///     Ok(())
+    /// })?;
+    /// ```
     pub fn open_or_create(
         path: impl AsRef<Path>,
         init: impl FnOnce(&mut VecFile) -> Result<(), std::io::Error>,
@@ -268,7 +300,16 @@ impl<'a> VecFile<'a> {
     ///
     /// # Errors
     ///
+    /// Creates a new file-backed persistent vector at the specified path, initializing it with an empty header.
+    ///
     /// Returns an error if the file cannot be created or memory-mapped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let vec_file = VecFile::create("data.vec")?;
+    /// assert_eq!(vec_file.len(), 0);
+    /// ```
     pub fn create(path: impl AsRef<Path>) -> std::io::Result<Self> {
         Self::_create(path.as_ref(), File::options().create(true).write(true))
     }
@@ -284,7 +325,15 @@ impl<'a> VecFile<'a> {
     /// - The file doesn't exist
     /// - The file cannot be opened for reading and writing
     /// - The file cannot be memory-mapped
-    /// - The file has invalid header format
+    /// Opens an existing file-backed vector, validating the header format.
+    ///
+    /// Returns an error if the file does not exist or the header is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let vec_file = VecFile::open("data.vec")?;
+    /// ```
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let mut options = File::options();
         options.read(true).write(true);
@@ -385,16 +434,55 @@ where
         self.mmap_file.len_mut()
     }
 
+    /// Ensures the underlying memory-mapped storage has at least the specified capacity, expanding the file if necessary.
+    ///
+    /// # Arguments
+    ///
+    /// * `capacity` - The minimum number of bytes the storage should be able to hold.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if resizing or remapping the underlying file fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vec_file = VecFile::create("data.bin")?;
+    /// vec_file.reserve(1024)?;
+    /// assert!(vec_file.capacity() >= 1024);
+    /// # std::fs::remove_file("data.bin").unwrap();
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     fn reserve(&mut self, capacity: usize) -> std::io::Result<()> {
         self.mmap_file.reserve(capacity)
     }
 
     #[cfg(not(windows))]
+    /// Shrinks the underlying file-backed memory mapping to the specified capacity.
+    ///
+    /// Reduces the mapped file size if the requested capacity is less than the current mapping size. On Windows, also remaps the header region to handle platform-specific constraints.
+    ///
+    /// # Arguments
+    ///
+    /// * `capacity` - The new desired capacity in bytes.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the operation succeeds, or an error if remapping or file truncation fails.
     fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
         self.mmap_file.shrink_to(capacity)
     }
 
     #[cfg(windows)]
+    /// Shrinks the underlying file-backed memory mapping to the specified capacity.
+    ///
+    /// Remaps the header region after shrinking to ensure correct access to the length field. On Windows, this handles platform-specific constraints for remapping file-backed memory regions.
+    ///
+    /// # Parameters
+    /// - `capacity`: The new capacity in bytes to shrink the mapping to.
+    ///
+    /// # Returns
+    /// Returns `Ok(())` if the mapping was successfully shrunk, or an error if remapping fails.
     fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
         self.len_mmap = MmapOptions::new().len(0).map_anon()?;
         let shrink_result = self.mmap_file.shrink_to(capacity);
@@ -475,7 +563,17 @@ impl MmapAnon {
     /// Returns an error if the memory mapping cannot be created, typically due to:
     /// - Insufficient virtual address space
     /// - System limits on memory mappings
-    /// - Invalid size (e.g., zero or too large)
+    /// Creates a new anonymous memory mapping with the specified size and zero initial length.
+    ///
+    /// Returns an error if the requested size is zero or exceeds system limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let anon = MmapAnon::with_size(4096).unwrap();
+    /// assert_eq!(anon.len(), 0);
+    /// assert_eq!(anon.capacity(), 4096);
+    /// ```
     pub fn with_size(size: usize) -> std::io::Result<Self> {
         let mut options = MmapOptions::new();
         let mmap = options.len(size).map_anon()?;
@@ -530,7 +628,21 @@ impl MmapAnon {
     /// options. Common causes include:
     /// - Unsupported options on the current platform
     /// - Insufficient memory or virtual address space
-    /// - System limits exceeded
+    /// Creates an anonymous memory mapping with custom options.
+    ///
+    /// Returns a new `MmapAnon` with the specified `MmapOptions` and an initial length of zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the memory mapping cannot be created, such as when system limits are exceeded.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use memmap2::MmapOptions;
+    /// let anon = MmapAnon::with_options(MmapOptions::new().len(4096)).unwrap();
+    /// assert_eq!(anon.len(), 0);
+    /// ```
     pub fn with_options(options: MmapOptions) -> std::io::Result<Self> {
         let mmap = options.map_anon()?;
         Ok(Self {
@@ -542,6 +654,7 @@ impl MmapAnon {
 }
 
 impl core::fmt::Debug for MmapAnon {
+    /// Formats the `MmapAnon` struct for debugging, displaying its capacity and current length.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MmapAnon")
             .field("capacity", &self.mmap.len())
@@ -553,12 +666,31 @@ impl core::fmt::Debug for MmapAnon {
 impl core::ops::Deref for MmapAnon {
     type Target = [u8];
 
+    /// Returns a shared reference to the underlying memory-mapped byte slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let anon = MmapAnon::with_size(1024).unwrap();
+    /// let slice: &[u8] = &*anon;
+    /// assert_eq!(slice.len(), 1024);
+    /// ```
     fn deref(&self) -> &Self::Target {
         &self.mmap[..]
     }
 }
 
 impl core::ops::DerefMut for MmapAnon {
+    /// Returns a mutable reference to the underlying memory-mapped byte slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::MmapAnon;
+    /// let mut mmap = MmapAnon::with_size(16).unwrap();
+    /// mmap.deref_mut()[0] = 42;
+    /// assert_eq!(mmap[0], 42);
+    /// ```
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.mmap[..]
     }
@@ -570,22 +702,52 @@ where
 {
     type Error = std::io::Error;
 
+    /// Returns a raw pointer to the start of the mapped memory region.
     fn as_ptr(&self) -> *const u8 {
         self.mmap.as_ptr()
     }
 
+    /// Returns a mutable raw pointer to the start of the mapped memory region.
     fn as_mut_ptr(&mut self) -> *mut u8 {
         self.mmap.as_mut_ptr()
     }
 
+    /// Returns the current length of valid data in the memory mapping.
     fn len(&self) -> usize {
         self.len
     }
 
+    /// Returns a mutable reference to the current length of valid data in the anonymous memory mapping.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut anon = MmapAnon::with_size(1024).unwrap();
+    /// *anon.len_mut() = 512;
+    /// assert_eq!(anon.len(), 512);
+    /// ```
     fn len_mut(&mut self) -> &mut usize {
         &mut self.len
     }
 
+    /// Ensures the anonymous memory mapping has at least the specified capacity, growing it if necessary.
+    ///
+    /// If the requested capacity exceeds the current mapping size, allocates a new anonymous mapping with the larger capacity,
+    /// copies existing data into it, and replaces the old mapping. If the capacity is already sufficient, does nothing.
+    ///
+    /// # Parameters
+    /// - `capacity`: The minimum number of bytes the mapping should be able to hold.
+    ///
+    /// # Returns
+    /// Returns `Ok(())` if the operation succeeds, or an error if the new mapping cannot be created.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut anon = MmapAnon::with_size(1024).unwrap();
+    /// anon.reserve(2048).unwrap();
+    /// assert!(anon.len() <= 2048);
+    /// ```
     fn reserve(&mut self, capacity: usize) -> std::io::Result<()> {
         let current_capacity = self.mmap.len();
         if capacity <= current_capacity {
@@ -610,6 +772,25 @@ where
         Ok(())
     }
 
+    /// Shrinks the anonymous memory mapping to the specified capacity, preserving existing data up to the new capacity.
+    ///
+    /// If the requested capacity is less than the current length, the mapping is resized to at least the current length to avoid data loss. Existing data is copied into the new mapping up to the new capacity.
+    ///
+    /// # Arguments
+    ///
+    /// * `capacity` - The desired new capacity in bytes.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the mapping was successfully resized, or an error if the new mapping could not be created.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut anon = MmapAnon::with_size(1024).unwrap();
+    /// anon.shrink_to(512).unwrap();
+    /// assert!(anon.len() <= 1024);
+    /// ```
     fn shrink_to(&mut self, capacity: usize) -> Result<(), Self::Error> {
         let current_capacity = self.mmap.len();
         if capacity >= current_capacity {
