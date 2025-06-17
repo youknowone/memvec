@@ -35,7 +35,23 @@ where
 
     /// Create a MemVec object with memory.
     /// # Safety
-    /// The memory must represent valid len and bytes representations of T.
+    /// Converts the memory into a `MemVec` of type `T`, validating alignment and capacity.
+    ///
+    /// # Safety
+    ///
+    /// The underlying memory must be properly aligned for `T` and contain a valid logical length and byte representation for elements of type `T`. Failure to meet these requirements may result in undefined behavior.
+    ///
+    /// Returns a `MemVec` on success, or the original memory and a `MemoryLayoutError` if the conversion fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use your_crate::{Memory, MemVec, MemoryLayoutError};
+    /// // Assume `mem` implements `Memory`
+    /// // unsafe {
+    /// //     let memvec: Result<MemVec<u32, _>, _> = mem.try_into_memvec::<u32>();
+    /// // }
+    /// ```
     unsafe fn try_into_memvec<'a, T: Copy>(
         self,
     ) -> Result<MemVec<'a, T, Self>, (Self, MemoryLayoutError)>
@@ -71,6 +87,17 @@ pub enum MemoryLayoutError {
 }
 
 impl core::fmt::Display for MemoryLayoutError {
+    /// Formats the `MemoryLayoutError` as a human-readable message.
+    ///
+    /// This method provides descriptive error messages for each variant of `MemoryLayoutError` when used with formatting macros.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::MemoryLayoutError;
+    /// assert_eq!(format!("{}", MemoryLayoutError::MisalignedMemory), "memory is not properly aligned for the target type");
+    /// assert_eq!(format!("{}", MemoryLayoutError::CapacityExceeded), "logical length exceeds available memory capacity");
+    /// ```
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             MemoryLayoutError::MisalignedMemory => {

@@ -75,6 +75,16 @@ fn mmap_file() {
 }
 
 #[test]
+/// Tests memory-mapped vector operations using a file-backed `VecFile` and the `Record41` type.
+///
+/// This test creates a temporary file, initializes a memory-mapped vector, inserts and validates records,
+/// manages capacity, and ensures data persistence across remapping and reopening. The file is deleted after the test completes.
+///
+/// # Examples
+///
+/// ```
+/// memvec_file();
+/// ```
 fn memvec_file() {
     let mut path = std::env::temp_dir();
     path.push("memvec.memvec");
@@ -111,6 +121,15 @@ fn memvec_file() {
 }
 
 #[test]
+/// Tests creating a zero-sized anonymous memory map and using it as a memory-backed vector of `Record41`.
+///
+/// The test verifies that records can be pushed, validated, capacity can be reserved, and the vector can be shrunk to fit the number of elements.
+///
+/// # Examples
+///
+/// ```
+/// mmap_anon();
+/// ```
 fn mmap_anon() {
     let mmap = MmapAnon::with_size(0).expect("mmap anon failed");
     let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
@@ -121,6 +140,16 @@ fn mmap_anon() {
 }
 
 #[test]
+/// Tests creating an anonymous memory map with a specified size and using it as a memory-backed vector of `Record41`.
+///
+/// The test verifies that the vector can store at least 10 records, pushes 10 records, checks their validity,
+/// reserves additional capacity, and then shrinks the vector to fit exactly 10 elements.
+///
+/// # Examples
+///
+/// ```
+/// mmap_anon_with_size();
+/// ```
 fn mmap_anon_with_size() {
     let mmap = MmapAnon::with_size(500).expect("mmap anon failed");
     let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
@@ -137,6 +166,17 @@ fn mmap_anon_with_size() {
 }
 
 #[test]
+/// Tests creating an anonymous memory map with custom options and using it as a memory-backed vector of `Record41`.
+///
+/// This test configures `MmapOptions` (including page population on Linux), creates an anonymous memory map,
+/// converts it into a `MemVec<Record41>`, inserts and validates 10 records, reserves additional capacity,
+/// and shrinks the vector to fit.
+///
+/// # Examples
+///
+/// ```
+/// mmap_anon_with_options();
+/// ```
 fn mmap_anon_with_options() {
     #[allow(unused_mut)]
     let mut options = MmapOptions::new();
@@ -153,6 +193,17 @@ fn mmap_anon_with_options() {
     memvec_shrink10(&mut vec);
 }
 
+/// Pushes 10 new records with sequential IDs into the provided memory vector, asserting initial and post-push capacity.
+///
+/// The function asserts that the vector's initial capacity is zero, pushes records with IDs 0 through 9, and then asserts that the capacity has increased.
+///
+/// # Examples
+///
+/// ```
+/// let mut vec = MemVec::<Record41, _>::new();
+/// memvec_push10(&mut vec);
+/// assert_eq!(vec.len(), 10);
+/// ```
 fn memvec_push10<T: Record, A: Memory>(vec: &mut MemVec<T, A>) {
     assert_eq!(vec.capacity(), 0);
     for i in 0..10 {
