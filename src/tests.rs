@@ -112,7 +112,7 @@ fn memvec_file() {
 
 #[test]
 fn mmap_anon() {
-    let mmap = MmapAnon::with_capacity(0).expect("mmap anon failed");
+    let mmap = MmapAnon::with_size(0).expect("mmap anon failed");
     let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
     memvec_push10(&mut vec);
     memvec_check10(&vec);
@@ -121,8 +121,8 @@ fn mmap_anon() {
 }
 
 #[test]
-fn mmap_anon_with_capacity() {
-    let mmap = MmapAnon::with_capacity(500).expect("mmap anon failed");
+fn mmap_anon_with_size() {
+    let mmap = MmapAnon::with_size(500).expect("mmap anon failed");
     let mut vec = unsafe { mmap.try_into_memvec::<Record41>() }.unwrap();
     assert!(vec.capacity() >= 10);
 
@@ -138,6 +138,7 @@ fn mmap_anon_with_capacity() {
 
 #[test]
 fn mmap_anon_with_options() {
+    #[allow(unused_mut)]
     let mut options = MmapOptions::new();
     #[cfg(target_os = "linux")]
     options.populate();

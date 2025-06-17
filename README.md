@@ -65,7 +65,7 @@ struct Point3D {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create anonymous memory mapping (no file, just fast memory)
-    let mmap = MmapAnon::with_capacity(1_000_000)?; // 1M points
+    let mmap = MmapAnon::with_size(32 * 1_000_000)?; // 32MB for 1M points
     let mut points = unsafe { MemVec::<Point3D, _>::try_from_memory(mmap)? };
 
     // Generate and store 1 million 3D points
@@ -116,7 +116,6 @@ options.len(1_000_000);
 
 #[cfg(target_os = "linux")]
 {
-    options.huge();     // Use huge pages for better TLB performance
     options.populate(); // Pre-fault pages to avoid page faults
 }
 
