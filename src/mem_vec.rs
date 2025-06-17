@@ -29,7 +29,7 @@ use core::{
 /// struct Point { x: i32, y: i32 }
 ///
 /// // Create with anonymous memory mapping
-/// let mmap = MmapAnon::with_capacity(1024)?;
+/// let mmap = MmapAnon::with_size(1024)?;
 /// let mut vec = unsafe { MemVec::<Point, _>::try_from_memory(mmap).unwrap() };
 ///
 /// // Use like a regular Vec
@@ -566,7 +566,6 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
         self.len() == 0
     }
 
-    #[cfg(not(no_global_oom_handling))]
     pub fn resize_with<F>(&mut self, new_len: usize, f: F)
     where
         F: FnMut() -> T,
@@ -608,7 +607,6 @@ impl<T, F: FnMut() -> T> ExtendWith<T> for ExtendFunc<F> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 fn capacity_overflow() -> usize {
     panic!("capacity overflow");
 }
@@ -692,7 +690,7 @@ impl<'a, T: Copy, A: 'a + Memory> MemVec<'a, T, A> {
 
             if n > 0 {
                 // We can write the last element directly without cloning needlessly
-                std::ptr::write(ptr, value.last());
+                core::ptr::write(ptr, value.last());
                 *self.mem.len_mut() += 1;
             }
 

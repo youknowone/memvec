@@ -83,4 +83,4 @@ impl core::fmt::Display for MemoryLayoutError {
     }
 }
 
-impl std::error::Error for MemoryLayoutError {}
+impl core::error::Error for MemoryLayoutError {}

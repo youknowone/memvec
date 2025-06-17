@@ -421,14 +421,14 @@ pub struct MmapAnon {
 }
 
 impl MmapAnon {
-    /// Creates a new anonymous memory mapping with the specified capacity.
+    /// Creates a new anonymous memory mapping with the specified size.
     ///
     /// This is the simplest way to create an `MmapAnon` backend. The mapping starts
-    /// with zero length but has the specified capacity available for growth.
+    /// with zero length but has the specified size available for growth.
     ///
     /// # Arguments
     ///
-    /// * `capacity` - The initial capacity in bytes. Must be non-zero.
+    /// * `size` - The memory mapping size in bytes. Must be non-zero.
     ///
     /// # Examples
     ///
@@ -438,8 +438,8 @@ impl MmapAnon {
     /// #[derive(Copy, Clone)]
     /// struct Point { x: f32, y: f32 }
     ///
-    /// // Create mapping with capacity for ~1000 points
-    /// let mmap = MmapAnon::with_capacity(8000)?;
+    /// // Create mapping with size for ~1000 points  
+    /// let mmap = MmapAnon::with_size(8000)?;
     /// let mut vec = unsafe { MemVec::<Point, _>::try_from_memory(mmap).unwrap() };
     ///
     /// // Vector starts empty but can grow up to capacity
@@ -475,10 +475,10 @@ impl MmapAnon {
     /// Returns an error if the memory mapping cannot be created, typically due to:
     /// - Insufficient virtual address space
     /// - System limits on memory mappings
-    /// - Invalid capacity (e.g., zero or too large)
-    pub fn with_capacity(capacity: usize) -> std::io::Result<Self> {
+    /// - Invalid size (e.g., zero or too large)
+    pub fn with_size(size: usize) -> std::io::Result<Self> {
         let mut options = MmapOptions::new();
-        let mmap = options.len(capacity).map_anon()?;
+        let mmap = options.len(size).map_anon()?;
         Ok(Self {
             mmap,
             len: 0,
@@ -512,7 +512,7 @@ impl MmapAnon {
     /// // Platform-specific optimizations
     /// #[cfg(target_os = "linux")]
     /// {
-    ///     options.huge();     // Use huge pages
+    ///     options.huge(None);     // Use huge pages
     ///     options.populate(); // Pre-fault all pages
     /// }
     ///
