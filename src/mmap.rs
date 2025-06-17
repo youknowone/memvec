@@ -312,6 +312,7 @@ impl<'a> VecFile<'a> {
         Ok(())
     }
 
+    /// Creates a new `VecFile` from an existing file using a default Mmap options.
     pub fn from_file(file: File) -> std::io::Result<Self> {
         let len_mmap = Self::_len_mmap(&file)?;
         let len = unsafe { &mut *(len_mmap.deref().as_ptr() as *mut usize) };
@@ -341,10 +342,12 @@ impl<'a> VecFile<'a> {
         Ok(len_mmap)
     }
 
+    /// Consumes the `VecFile` and returns the underlying file.
     pub fn into_file(self) -> File {
         self.mmap_file.into_file()
     }
 
+    /// Returns a reference to the underlying file.
     pub fn file(&self) -> &File {
         self.mmap_file.file()
     }
